@@ -1,9 +1,26 @@
 {
-  "sshHost": "user@host",
-  "sshKey": "/path/to/private-key",
-  "mcpPort": 0,
-  "quotaUrl": "http://127.0.0.1:<port>",
-  "quotaCredential": "name-in-the-harness-credential-store",
   "clientName": "dsh",
-  "screenshotDir": ""
+  "screenshotDir": "",
+  "routes": [
+    {
+      "id": "primary",
+      "provider": "antigravity",
+      "providerName": "Gemini on host A",
+      "modelName": "Gemini 3.8 Flash",
+      "sshHost": "user@host-a",
+      "sshKey": "/path/to/key-a",
+      "mcpPort": 0,
+      "quotaUrl": "http://127.0.0.1:<port>",
+      "quotaCredential": "name-in-the-harness-credential-store"
+    },
+    {
+      "id": "second",
+      "provider": "antigravity-2",
+      "providerName": "Gemini on host B",
+      "modelName": "Gemini 3.8 Flash",
+      "sshHost": "user@host-b",
+      "sshKey": "/path/to/key-b",
+      "mcpPort": 0
+    }
+  ]
 }

@@ -69,8 +69,20 @@ function configuredRoutes() {
 /** Routes that should actually start. Tests talk to one local mock. */
 export function routes() {
   const all = configuredRoutes()
-  if (process.env.DSH_AGY_ACP_COMMAND) return all.slice(0, 1)
-  return all
+  const named = disambiguate(all)
+  if (process.env.DSH_AGY_ACP_COMMAND) return named.slice(0, 1)
+  return named
+}
+
+/** Two routes that share a model label would be indistinguishable in the picker. */
+function disambiguate(list) {
+  const counts = new Map()
+  for (const route of list) counts.set(route.modelName, (counts.get(route.modelName) ?? 0) + 1)
+  return list.map((route) => (
+    counts.get(route.modelName) > 1
+      ? { ...route, modelName: `${route.modelName} · ${route.providerName}` }
+      : route
+  ))
 }
 
 const first = configuredRoutes()[0]

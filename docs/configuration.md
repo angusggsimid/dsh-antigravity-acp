@@ -4,6 +4,12 @@
 
 一条路线用下面的平铺字段。多条路线时改用 `routes` 数组，每一项都是同样的字段（`sshHost`、`sshKey`、`mcpPort`、`quotaUrl`、`quotaCredential`，以及可选的 `home` 和 `agent`）。插件不会为某一条路线另写一套行为。
 
+## 多台机器
+
+`routes` 里每一项是一条独立的隧道：自己的 SSH 主机、自己的密钥、自己的本机端口、自己的 `agy` 进程。模型选择器里选哪一项，就只用那一条。两项的 `provider` 不能相同。`modelName` 如果一样，选择器会自动加上 `providerName` 来区分。
+
+没有 `routes` 时，文件顶层的 `sshHost` / `sshKey` 仍表示唯一的一条。
+
 ## 本机文件
 
 | 字段 | 作用 |

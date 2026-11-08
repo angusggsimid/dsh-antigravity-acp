@@ -1206,6 +1206,8 @@ class Runtime {
     this.tunnelStderr = ''
     this.tunnelAttempts = 0
     this.tunnelRestart = undefined
+    /** True only after the remote host can actually reach this route's MCP port. */
+    this.tunnelVerified = false
     this.attachments = undefined
     this.sweeper = undefined
     this.ready = undefined
@@ -1229,10 +1231,12 @@ class Runtime {
     // A dead tunnel must never brick the provider: the bridge still serves, turns
     // fail per session with a clear error, and the tunnel is retried in the backoff.
     this.ready = this.#bootstrap().catch((error) => {
-      log(this.ctx, `bootstrap incomplete: ${error instanceof Error ? error.message : error}`)
+      log(this.ctx, `${this.route.provider} bootstrap incomplete: ${error instanceof Error ? error.message : error}`)
       this.#scheduleTunnelRestart()
+      throw error
     })
-    // Warm the front so the first real turn skips process startup.
+    // Warm the front only after this route's tunnel answers. Starting agy first
+    // makes it sit on a dead MCP port and then answer with no tools at all.
     if (WARMUP) this.ready.then(() => this.link?.start()).catch(() => {})
     this.sweeper = setInterval(() => this.#sweep(), SWEEP_MS)
     this.sweeper.unref?.()
@@ -1325,25 +1329,61 @@ class Runtime {
     log(this.ctx, `MCP bridge on 127.0.0.1:${this.port}`)
   }
 
-  /** The reverse tunnel is shared. If it dies, everything's tools die — so restart it. */
+  /**
+   * One tunnel per route. The process being alive is not enough: agy dials the
+   * forwarded port from the remote host, and a prompt sent before that dial
+   * works is answered with no tools.
+   */
   async #ensureTunnel() {
-    if (NO_TUNNEL) return
+    if (NO_TUNNEL) { this.tunnelVerified = true; return }
     requireSsh(this.route)
-    if (this.tunnel && this.tunnel.exitCode == null) return
-    this.tunnelStderr = ''
-    this.tunnel = spawn('ssh', [...sshOptions(this.route), '-o', 'ExitOnForwardFailure=yes', '-N',
-      '-R', `127.0.0.1:${this.port}:127.0.0.1:${this.port}`, this.route.sshHost], { stdio: ['ignore', 'ignore', 'pipe'] })
-    this.tunnel.stderr.on('data', (chunk) => { this.tunnelStderr = (this.tunnelStderr + chunk.toString()).slice(-2000) })
-    this.tunnel.on('error', (error) => log(this.ctx, `reverse tunnel spawn error: ${error instanceof Error ? error.message : error}`))
-    this.tunnel.on('exit', (code) => this.#onTunnelExit(code))
-    await new Promise((resolve) => setTimeout(resolve, 700))
-    if (this.tunnel?.exitCode != null) {
-      throw new Error(`reverse tunnel failed: ${this.tunnelStderr.slice(-400)}`)
+    if (!(this.tunnel && this.tunnel.exitCode == null)) {
+      this.tunnelVerified = false
+      this.tunnelStderr = ''
+      this.tunnel = spawn('ssh', [...sshOptions(this.route), '-o', 'ExitOnForwardFailure=yes', '-N',
+        '-R', `127.0.0.1:${this.port}:127.0.0.1:${this.port}`, this.route.sshHost], { stdio: ['ignore', 'ignore', 'pipe'] })
+      this.tunnel.stderr.on('data', (chunk) => { this.tunnelStderr = (this.tunnelStderr + chunk.toString()).slice(-2000) })
+      this.tunnel.on('error', (error) => log(this.ctx, `${this.route.provider} reverse tunnel spawn error: ${error instanceof Error ? error.message : error}`))
+      this.tunnel.on('exit', (code) => this.#onTunnelExit(code))
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      if (this.tunnel?.exitCode != null) {
+        throw new Error(`reverse tunnel failed: ${this.tunnelStderr.slice(-400)}`)
+      }
     }
+    if (this.tunnelVerified) return
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (await this.#probeTunnel()) {
+        this.tunnelVerified = true
+        log(this.ctx, `${this.route.provider} tunnel ready on ${this.port}`)
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+    throw new Error(`${this.route.providerName} reverse tunnel is up but the remote host cannot reach the local tool bridge`)
+  }
+
+  /** Ask the remote host to open this route's forwarded health URL. */
+  #probeTunnel() {
+    return new Promise((resolve) => {
+      const child = spawn('ssh', [...sshOptions(this.route), '-T', this.route.sshHost, '--',
+        `python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:${this.port}/health", timeout=4).read()'`],
+      { stdio: ['ignore', 'ignore', 'pipe'] })
+      const timer = setTimeout(() => { try { child.kill('SIGTERM') } catch { /* gone */ } resolve(false) }, 12_000)
+      child.on('error', () => { clearTimeout(timer); resolve(false) })
+      child.on('exit', (code) => { clearTimeout(timer); resolve(code === 0) })
+    })
+  }
+
+  /** Block a turn until this model's own tunnel can carry tool calls. */
+  async ensureReachable() {
+    if (NO_TUNNEL || ACP_COMMAND) return
+    if (this.tunnelVerified && this.tunnel && this.tunnel.exitCode == null) return
+    await this.#ensureTunnel()
   }
 
   #onTunnelExit(code) {
     this.tunnel = undefined
+    this.tunnelVerified = false
     if (this.stopping) return
     log(this.ctx, `reverse tunnel exited (${code ?? 'signal'}); ${this.tunnelStderr.slice(-300)}`)
     this.#scheduleTunnelRestart()
@@ -1417,6 +1457,12 @@ class Runtime {
   }
 
   async #http(req, res) {
+    const path = (req.url || '').split('?')[0]
+    if (req.method === 'GET' && (path === '/health' || path.endsWith('/health'))) {
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      res.end('ok')
+      return
+    }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
     const tenant = decodeURIComponent((req.url || '').split('/').filter(Boolean).pop() || '')
     const conversation = this.tenants.get(tenant)
@@ -1682,6 +1728,7 @@ class Runtime {
   }
 
   async *#streamLocked(conversation, options) {
+    await this.ensureReachable()
     const tools = options.tools ?? []
     const messages = options.messages ?? []
     const continued = continuationResults(messages, conversation)
