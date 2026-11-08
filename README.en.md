@@ -20,10 +20,14 @@ It does not sign you in to Google, and it does not ship a host, a key, or a port
 
 ## What it does
 
-- Registers the `antigravity` provider and the `gemini-3.8-flash` model.
+- Registers Gemini 3.8 Flash. One plugin can register several routes. Each route is one model, one remote machine, and one sign-in.
 - Lets more than one DeepSeek Harness session use the model at once. Each ACP session has its own worker.
 - Resumes the previous ACP session after idle time or a dropped connection, instead of replaying the whole transcript.
 - Adds an Antigravity subscription section in Settings, and a quota badge beside the composer while Gemini is selected.
+
+## Extensibility
+
+Routes live in the local config file, not in the repository. Chat, tool transport, and quota display share one code path, so adding a route does not fork the plugin. Settings shows one quota row per route. The composer badge shows only the route that is selected. A route without a quota bridge can still chat.
 
 ## What it does not do
 
@@ -72,6 +76,14 @@ npm test
 ```
 
 `npm test` uses a local mock. It does not contact a remote host and does not spend quota. `npm run test:real` talks to the real `agy acp` from your local configuration.
+
+## Docs
+
+| Doc | Contents |
+| --- | --- |
+| [docs/setup.en.md](docs/setup.en.md) | How to reproduce the routes, with no machine-specific secrets |
+| [docs/architecture.md](docs/architecture.md) | How it is put together |
+| [docs/configuration.md](docs/configuration.md) | Local config and environment variables |
 
 ## License
 

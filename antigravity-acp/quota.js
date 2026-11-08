@@ -15,17 +15,17 @@
  * weekly / five-hour buckets for every model family, so the panel and the
  * composer badge show exactly what the CLI shows.
  */
-import { deployment } from './deployment.js'
+import { routes } from './deployment.js'
 
 const FRESH_MS = 60_000
 
-async function bridgeJson(credentials, path, timeoutMs = 120_000) {
-  if (!deployment.quotaUrl || !deployment.quotaCredential) {
+async function bridgeJson(credentials, route, path, timeoutMs = 120_000) {
+  if (!route.quotaUrl || !route.quotaCredential) {
     throw new Error('quota bridge is not configured')
   }
-  const credential = await credentials.resolve(deployment.quotaCredential)
+  const credential = await credentials.resolve(route.quotaCredential)
   if (credential === undefined) throw new Error('quota credential is not configured')
-  const response = await fetch(`${deployment.quotaUrl}${path}`, {
+  const response = await fetch(`${route.quotaUrl}${path}`, {
     headers: { authorization: `Bearer ${credential.value}` },
     signal: AbortSignal.timeout(timeoutMs),
   })
@@ -76,16 +76,38 @@ function publicStatus(account, usage, models) {
 /** Last successful payload, with one in-flight collection at a time. */
 const cache = { at: 0, payload: undefined, inFlight: undefined }
 
+async function collectRoute(ctx, route) {
+  const label = { id: route.id, provider: route.provider, name: route.providerName }
+  if (!route.quotaUrl || !route.quotaCredential) {
+    return { ...label, ok: false, error: '这条线路还没有额度桥' }
+  }
+  try {
+    const [account, usage, catalogue] = await Promise.all([
+      bridgeJson(ctx.credentials, route, '/v1/account'),
+      bridgeJson(ctx.credentials, route, '/v1/usage', 150_000),
+      bridgeJson(ctx.credentials, route, '/v1/models', 90_000),
+    ])
+    return { ...label, ...publicStatus(account, usage, catalogue?.data) }
+  } catch (error) {
+    return { ...label, ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 function collect(ctx) {
   if (cache.inFlight !== undefined) return cache.inFlight
   cache.inFlight = (async () => {
     try {
-      const [account, usage, catalogue] = await Promise.all([
-        bridgeJson(ctx.credentials, '/v1/account'),
-        bridgeJson(ctx.credentials, '/v1/usage', 150_000),
-        bridgeJson(ctx.credentials, '/v1/models', 90_000),
-      ])
-      cache.payload = publicStatus(account, usage, catalogue?.data)
+      const accounts = []
+      for (const route of routes()) accounts.push(await collectRoute(ctx, route))
+      const firstOk = accounts.find((account) => account.ok)
+      cache.payload = {
+        ok: accounts.length > 0,
+        accounts,
+        account: firstOk?.account,
+        models: firstOk?.models ?? [],
+        groups: firstOk?.groups ?? [],
+        gemini: firstOk?.gemini ?? null,
+      }
       cache.at = Date.now()
       return cache.payload
     } finally {
@@ -137,18 +159,29 @@ export function applyQuota(ctx) {
     },
     isConcurrencySafe() { return true },
     async execute() {
-      const usage = await bridgeJson(ctx.credentials, '/v1/usage', 150_000)
-      const groups = groupsOf(usage)
-      if (groups.length === 0) throw new Error('gemini_quota: the CLI returned no quota groups')
       const lines = []
-      for (const group of groups) {
-        lines.push(group.name)
-        for (const window of group.windows) {
-          const percent = typeof window.remaining === 'number' ? `${(window.remaining * 100).toFixed(1)}%` : '未知'
-          const reset = window.resetTime === null ? '' : `，${window.resetTime} 重置`
-          lines.push(`  ${window.label}：${percent}${reset}`)
+      for (const route of routes()) {
+        lines.push(route.providerName)
+        if (!route.quotaUrl || !route.quotaCredential) {
+          lines.push('  这条线路还没有额度桥')
+          continue
+        }
+        const usage = await bridgeJson(ctx.credentials, route, '/v1/usage', 150_000)
+        const groups = groupsOf(usage)
+        if (groups.length === 0) {
+          lines.push('  没有额度数据')
+          continue
+        }
+        for (const group of groups) {
+          lines.push(`  ${group.name}`)
+          for (const window of group.windows) {
+            const percent = typeof window.remaining === 'number' ? `${(window.remaining * 100).toFixed(1)}%` : '未知'
+            const reset = window.resetTime === null ? '' : `，${window.resetTime} 重置`
+            lines.push(`    ${window.label}：${percent}${reset}`)
+          }
         }
       }
+      if (lines.length === 0) throw new Error('gemini_quota: no routes configured')
       return { text: lines.join('\n') }
     },
   })

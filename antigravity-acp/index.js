@@ -22,16 +22,11 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeF
 import { createServer } from 'node:http'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { deployment, requireSsh } from './deployment.js'
+import { deployment, requireSsh, routes } from './deployment.js'
 import { applyQuota } from './quota.js'
 
 export const inject = ['llm', 'credentials', 'connection', 'tools']
 
-const PROVIDER = 'antigravity'
-const MODEL_ID = 'gemini-3.8-flash'
-const SSH_HOST = deployment.sshHost
-const SSH_KEY = deployment.sshKey
-const MCP_PORT = deployment.mcpPort
 /** Server name agy prefixes onto our MCP tools; anything else is one of agy's own tools. */
 const MCP_SERVER = 'dsh'
 /**
@@ -118,10 +113,8 @@ const REPLAY_BUDGET_BYTES = Number(process.env.DSH_AGY_REPLAY_BYTES ?? 160_000)
 const MAX_TRANSCRIPT_IMAGES = 3
 /** ACP client identity sent in `initialize`. */
 const CLIENT_NAME = deployment.clientName
-/** Isolated Antigravity home on the remote host (`--gemini-dir`). */
-const HOME_DIR = process.env.DSH_AGY_HOME || '$HOME/.dsh-antigravity'
-/** Bridge agent: `tools: []` + `excludeDefaultComponents` disables built-ins at the source. */
-const AGENT_NAME = process.env.DSH_AGY_AGENT || 'dsh-bridge'
+/** Bridge agent name when a route does not set one. */
+const AGENT_NAME = 'dsh-bridge'
 /** Where MCP screenshot tools are expected to write (the mcp-playwright `cwd`). */
 const SCREENSHOT_DIR = deployment.screenshotDir
 /**
@@ -171,8 +164,8 @@ function sanitizeSchema(node) {
   return out
 }
 
-const sshOptions = () => [
-  '-i', SSH_KEY,
+const sshOptions = (route) => [
+  '-i', route.sshKey,
   '-o', 'BatchMode=yes',
   '-o', 'ConnectTimeout=12',
   '-o', 'ServerAliveInterval=15',
@@ -364,8 +357,9 @@ class Link {
     if (ACP_COMMAND) {
       this.child = spawn('sh', ['-c', ACP_COMMAND], { stdio: ['pipe', 'pipe', 'pipe'] })
     } else {
-      requireSsh()
-      this.child = spawn('ssh', [...sshOptions(), '-T', SSH_HOST, '--',
+      const route = this.runtime.route
+      requireSsh(route)
+      this.child = spawn('ssh', [...sshOptions(route), '-T', route.sshHost, '--',
         `export PATH="$HOME/.local/bin:$PATH"; exec agy acp ${flags}`],
       { stdio: ['pipe', 'pipe', 'pipe'] })
     }
@@ -1200,8 +1194,9 @@ function usageChunk(usage) {
 }
 
 class Runtime {
-  constructor(ctx) {
+  constructor(ctx, route) {
     this.ctx = ctx
+    this.route = route
     this.conversations = new Map()
     this.tenants = new Map()
     this.locks = new Map()
@@ -1219,9 +1214,14 @@ class Runtime {
     /** Shared `agy acp` front process. */
     this.link = undefined
     /** Isolated `--gemini-dir` and bridge agent on the remote host. */
-    this.home = HOME_DIR
-    this.agent = AGENT_NAME
+    this.home = route.home
+    this.agent = route.agent || AGENT_NAME
     this.prepared = undefined
+  }
+
+  /** Keep the original store keys for the first route so existing sessions resume. */
+  persistedKey(key) {
+    return this.route.id === 'primary' ? key : `${this.route.id}:${key}`
   }
 
   start() {
@@ -1285,9 +1285,9 @@ class Runtime {
         `python3 -c 'import json,sys,pathlib; p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text()) if p.exists() else {}; d["toolPermission"]="always-proceed"; d.setdefault("agentMode",""); p.write_text(json.dumps(d,indent=2))' "${home}/agy/settings.json"`,
         'echo DSH_PREP_OK',
       ].join('\n')
-      requireSsh()
+      requireSsh(this.route)
       await new Promise((resolve) => {
-        const child = spawn('ssh', [...sshOptions(), '-T', SSH_HOST, '--', script], { stdio: ['ignore', 'ignore', 'pipe'] })
+        const child = spawn('ssh', [...sshOptions(this.route), '-T', this.route.sshHost, '--', script], { stdio: ['ignore', 'ignore', 'pipe'] })
         let err = ''
         child.stderr.on('data', (chunk) => { err = (err + chunk.toString()).slice(-600) })
         child.on('exit', (code) => {
@@ -1309,7 +1309,7 @@ class Runtime {
     this.server.keepAliveTimeout = 0
     await new Promise((resolve, reject) => {
       this.server.once('error', reject)
-      this.server.listen(MCP_PORT, '127.0.0.1', () => {
+      this.server.listen(this.route.mcpPort, '127.0.0.1', () => {
         this.server.removeListener('error', reject)
         resolve()
       })
@@ -1328,11 +1328,11 @@ class Runtime {
   /** The reverse tunnel is shared. If it dies, everything's tools die — so restart it. */
   async #ensureTunnel() {
     if (NO_TUNNEL) return
-    requireSsh()
+    requireSsh(this.route)
     if (this.tunnel && this.tunnel.exitCode == null) return
     this.tunnelStderr = ''
-    this.tunnel = spawn('ssh', [...sshOptions(), '-o', 'ExitOnForwardFailure=yes', '-N',
-      '-R', `127.0.0.1:${this.port}:127.0.0.1:${this.port}`, SSH_HOST], { stdio: ['ignore', 'ignore', 'pipe'] })
+    this.tunnel = spawn('ssh', [...sshOptions(this.route), '-o', 'ExitOnForwardFailure=yes', '-N',
+      '-R', `127.0.0.1:${this.port}:127.0.0.1:${this.port}`, this.route.sshHost], { stdio: ['ignore', 'ignore', 'pipe'] })
     this.tunnel.stderr.on('data', (chunk) => { this.tunnelStderr = (this.tunnelStderr + chunk.toString()).slice(-2000) })
     this.tunnel.on('error', (error) => log(this.ctx, `reverse tunnel spawn error: ${error instanceof Error ? error.message : error}`))
     this.tunnel.on('exit', (code) => this.#onTunnelExit(code))
@@ -1566,7 +1566,7 @@ class Runtime {
       }],
     }
 
-    const saved = RESUME && !forceNew ? this.store.get(conversation.key) : undefined
+    const saved = RESUME && !forceNew ? this.store.get(this.persistedKey(conversation.key)) : undefined
     if (saved?.sessionId) {
       try {
         await conversation.link.request('session/resume', { sessionId: saved.sessionId, ...params }, 45_000)
@@ -1591,7 +1591,7 @@ class Runtime {
       } catch (error) {
         log(this.ctx, `resume failed for ${conversation.key}: ${error instanceof Error ? error.message : error}`)
       }
-      this.store.delete(conversation.key)
+      this.store.delete(this.persistedKey(conversation.key))
     }
 
     conversation.baseline = []
@@ -1602,7 +1602,7 @@ class Runtime {
     conversation.linkEpoch = conversation.link.epoch
     conversation.model = undefined
     conversation.effort = undefined
-    this.store.set(conversation.key, { sessionId: created.sessionId, toolKey, baseline: [] })
+    this.store.set(this.persistedKey(conversation.key), { sessionId: created.sessionId, toolKey, baseline: [] })
     log(this.ctx, `session ${created.sessionId} for ${conversation.key}`)
     diag('session.new', { key: conversation.key })
   }
@@ -1643,9 +1643,9 @@ class Runtime {
   }
 
   async configure(conversation, effort) {
-    if (conversation.model !== MODEL_ID) {
-      await conversation.link.request('session/set_config_option', { sessionId: conversation.sessionId, configId: 'model', value: MODEL_ID })
-      conversation.model = MODEL_ID
+    if (conversation.model !== this.route.modelId) {
+      await conversation.link.request('session/set_config_option', { sessionId: conversation.sessionId, configId: 'model', value: this.route.modelId })
+      conversation.model = this.route.modelId
     }
     const level = effort === 'low' || effort === 'high' ? effort : 'medium'
     if (conversation.effort !== level) {
@@ -1700,14 +1700,14 @@ class Runtime {
       // never saw those turns. Pasting a recap into the live session leaves two
       // competing histories; Codex and OpenCode both restart the provider session
       // and resend the full input instead.
-      const foreignFresh = REPLAY_FOREIGN_TURNS && freshSlice.some((message) => message?.role === 'assistant' && message.source?.provider !== undefined && message.source.provider !== PROVIDER)
+      const foreignFresh = REPLAY_FOREIGN_TURNS && freshSlice.some((message) => message?.role === 'assistant' && message.source?.provider !== undefined && message.source.provider !== this.route.provider)
       let forceNew = false
       if (live && (!prefixOk || foreignFresh)) {
         conversation.sessionId = undefined
         conversation.toolKey = ''
         conversation.baseline = []
         forceNew = true
-        this.store.delete(conversation.key)
+        this.store.delete(this.persistedKey(conversation.key))
       }
       await this.ensureSession(conversation, tools, { messages, forceNew, system: options.system ?? '' })
       await this.configure(conversation, options.reasoningEffort)
@@ -1771,7 +1771,7 @@ class Runtime {
       // `_meta`; only the per-turn tool inventory still needs to be in-band.
       prompt = [{ type: 'text', text: `Available tools: ${exposed.join(', ')}.` }, ...prompt]
       conversation.baseline = snapshotOf(messages)
-      this.store.set(conversation.key, { sessionId: conversation.sessionId, toolKey: conversation.toolKey, baseline: conversation.baseline })
+      this.store.set(this.persistedKey(conversation.key), { sessionId: conversation.sessionId, toolKey: conversation.toolKey, baseline: conversation.baseline })
       const generation = conversation.generation
       const epoch = conversation.epoch
       conversation.activeTurn = epoch
@@ -1909,9 +1909,10 @@ class Runtime {
 }
 
 function createAdapter(runtime) {
+  const route = runtime.route
   return {
     providerInfo(provider) {
-      return { id: provider, name: 'Gemini (AI Pro)' }
+      return { id: provider, name: route.providerName }
     },
     providerRetryPolicy() { return undefined },
     imageRequestPricing() { return undefined },
@@ -1921,9 +1922,9 @@ function createAdapter(runtime) {
     async listModels(provider) {
       return [{
         provider,
-        id: MODEL_ID,
-        name: 'Gemini 3.8 Flash',
-        description: 'Google AI Pro via the official Antigravity ACP server',
+        id: route.modelId,
+        name: route.modelName,
+        description: `${route.providerName} via the official Antigravity ACP server`,
         inputModalities: ['text', 'image'],
       }]
     },
@@ -1931,8 +1932,8 @@ function createAdapter(runtime) {
       return {
         provider,
         id: model,
-        name: 'Gemini 3.8 Flash',
-        description: 'Google AI Pro via the official Antigravity ACP server',
+        name: route.modelName,
+        description: `${route.providerName} via the official Antigravity ACP server`,
         inputModalities: ['text', 'image'],
         context: { contextWindow: CONTEXT_WINDOW },
         reasoning: {
@@ -1956,14 +1957,16 @@ function createAdapter(runtime) {
 
 export function apply(ctx) {
   applyQuota(ctx)
-  const runtime = new Runtime(ctx)
-  ctx.effect(() => {
-    runtime.start().catch((error) => log(ctx, `startup failed: ${error instanceof Error ? error.message : error}`))
-    const handle = ctx.llm.registerAdapter([PROVIDER], createAdapter(runtime))
-    log(ctx, 'registered provider antigravity')
-    return () => {
-      handle()
-      runtime.stop()
-    }
-  })
+  for (const route of routes()) {
+    const runtime = new Runtime(ctx, route)
+    ctx.effect(() => {
+      runtime.start().catch((error) => log(ctx, `${route.id} startup failed: ${error instanceof Error ? error.message : error}`))
+      const handle = ctx.llm.registerAdapter([route.provider], createAdapter(runtime))
+      log(ctx, `registered provider ${route.provider} (${route.providerName})`)
+      return () => {
+        handle()
+        runtime.stop()
+      }
+    })
+  }
 }

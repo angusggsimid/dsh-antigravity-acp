@@ -2,6 +2,9 @@
  * Deployment-specific settings. Nothing in this file is a default for a
  * particular machine. Values come from the environment, then from
  * ~/.dsh/antigravity-acp.local.json, which is outside the repository.
+ *
+ * One file can list several routes. Each route is one DSH provider, one remote
+ * host, and one Antigravity login. The chat path is the same for every route.
  */
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -25,20 +28,65 @@ function pick(envName, localValue, fallback = '') {
   return fallback
 }
 
+function routeFrom(raw, index) {
+  const source = raw !== null && typeof raw === 'object' ? raw : {}
+  return {
+    id: String(source.id || (index === 0 ? 'primary' : `route-${index + 1}`)),
+    provider: String(source.provider || (index === 0 ? 'antigravity' : `antigravity-${index + 1}`)),
+    providerName: String(source.providerName || (index === 0 ? 'Gemini (AI Pro)' : `Gemini (AI Pro ${index + 1})`)),
+    modelId: 'gemini-3.8-flash',
+    modelName: String(source.modelName || 'Gemini 3.8 Flash'),
+    sshHost: String(source.sshHost || ''),
+    sshKey: String(source.sshKey || ''),
+    mcpPort: Number((index === 0 ? process.env.DSH_AGY_MCP_PORT : '') || source.mcpPort || 0) || 0,
+    home: String(source.home || '$HOME/.dsh-antigravity'),
+    agent: String(source.agent || 'dsh-bridge'),
+    quotaUrl: String(source.quotaUrl || ''),
+    quotaCredential: String(source.quotaCredential || ''),
+  }
+}
+
 const local = readLocal()
 
+function configuredRoutes() {
+  if (Array.isArray(local.routes) && local.routes.length > 0) {
+    return local.routes.map((entry, index) => routeFrom(entry, index))
+  }
+  return [routeFrom({
+    id: 'primary',
+    provider: 'antigravity',
+    providerName: 'Gemini (AI Pro)',
+    modelName: 'Gemini 3.8 Flash',
+    sshHost: pick('DSH_AGY_SSH_HOST', local.sshHost),
+    sshKey: pick('DSH_AGY_SSH_KEY', local.sshKey),
+    mcpPort: pick('DSH_AGY_MCP_PORT', local.mcpPort, '0'),
+    home: pick('DSH_AGY_HOME', local.home, '$HOME/.dsh-antigravity'),
+    quotaUrl: pick('DSH_AGY_QUOTA_URL', local.quotaUrl),
+    quotaCredential: pick('DSH_AGY_QUOTA_CREDENTIAL', local.quotaCredential),
+  }, 0)]
+}
+
+/** Routes that should actually start. Tests talk to one local mock. */
+export function routes() {
+  const all = configuredRoutes()
+  if (process.env.DSH_AGY_ACP_COMMAND) return all.slice(0, 1)
+  return all
+}
+
+const first = configuredRoutes()[0]
+
 export const deployment = {
-  sshHost: pick('DSH_AGY_SSH_HOST', local.sshHost),
-  sshKey: pick('DSH_AGY_SSH_KEY', local.sshKey),
-  mcpPort: Number(pick('DSH_AGY_MCP_PORT', local.mcpPort, '0')) || 0,
-  quotaUrl: pick('DSH_AGY_QUOTA_URL', local.quotaUrl),
-  quotaCredential: pick('DSH_AGY_QUOTA_CREDENTIAL', local.quotaCredential),
+  sshHost: first.sshHost,
+  sshKey: first.sshKey,
+  mcpPort: first.mcpPort,
+  quotaUrl: first.quotaUrl,
+  quotaCredential: first.quotaCredential,
   clientName: pick('DSH_AGY_CLIENT_NAME', local.clientName, 'dsh'),
   screenshotDir: pick('DSH_AGY_SCREENSHOT_DIR', local.screenshotDir, join(homedir(), '.dsh', 'cache', 'screenshots')),
 }
 
-export function requireSsh() {
-  if (!deployment.sshHost || !deployment.sshKey) {
-    throw new Error('antigravity-acp: set sshHost and sshKey in ~/.dsh/antigravity-acp.local.json, or set DSH_AGY_SSH_HOST and DSH_AGY_SSH_KEY')
+export function requireSsh(route = first) {
+  if (!route.sshHost || !route.sshKey) {
+    throw new Error('antigravity-acp: each route needs sshHost and sshKey in ~/.dsh/antigravity-acp.local.json')
   }
 }

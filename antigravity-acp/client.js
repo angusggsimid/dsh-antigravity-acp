@@ -4,7 +4,7 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
 
-    const CACHE_KEY = 'dsh.agy.subscription.snapshot.v1'
+    const CACHE_KEY = 'dsh.agy.subscription.snapshot.v2'
     const FRESH_MS = 60_000
     const POLL_MS = 300_000
 
@@ -238,17 +238,23 @@ window.__ModuleLoader__.load({
             '暂时读不到订阅。桥接或隧道可能没起来，点刷新重试。'))
       }
 
-      const gemini = data.gemini ?? null
-      const five = gemini?.fiveHour ?? null
-      const weekly = gemini?.weekly ?? null
+      const accounts = Array.isArray(data.accounts) && data.accounts.length > 0
+        ? data.accounts
+        : [{ name: 'Antigravity', ok: data.ok, error: data.error, gemini: data.gemini, account: data.account }]
 
       return h('div', { style: { maxWidth: '720px', color: 'inherit' } },
         header,
 
         h(SectionTitle, null, '额度'),
-        h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
-          h(QuotaCard, { title: '5 小时窗口', window: five }),
-          h(QuotaCard, { title: '每周窗口', window: weekly })),
+        ...accounts.map((account) => h('div', { key: account.id ?? account.name, style: { marginBottom: '14px' } },
+          h('div', { style: { fontSize: '13px', fontWeight: 500, marginBottom: '8px' } },
+            account.name ?? 'Antigravity',
+            account.account?.email ? h('span', { style: { fontWeight: 400, opacity: 0.6, marginLeft: '8px' } }, account.account.email) : null),
+          account.ok === false
+            ? h('div', { style: { ...card, fontSize: '12px', opacity: 0.7 } }, account.error ?? '读取失败')
+            : h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
+              h(QuotaCard, { title: '5 小时窗口', window: account.gemini?.fiveHour ?? null }),
+              h(QuotaCard, { title: '每周窗口', window: account.gemini?.weekly ?? null })))),
 
         h(SectionTitle, null, '模型'),
         h('div', { style: { display: 'grid', gap: '8px' } },
@@ -292,11 +298,14 @@ window.__ModuleLoader__.load({
         () => directory.getSnapshot(),
       )
       const provider = modelState?.current?.provider
-      if (provider !== 'antigravity' && provider !== 'gemini') return null
       const data = state?.data
       if (!data?.ok) return null
-      const five = data.gemini?.fiveHour
-      const weekly = data.gemini?.weekly
+      const accounts = Array.isArray(data.accounts) ? data.accounts : []
+      const selected = accounts.find((account) => account.provider === provider)
+        ?? (provider === 'antigravity' || provider === 'gemini' ? accounts[0] : null)
+      if (!selected?.ok) return null
+      const five = selected.gemini?.fiveHour
+      const weekly = selected.gemini?.weekly
       if (!five && !weekly) return null
       const parts = []
       if (five) parts.push(`5h ${percent(five.remaining)}`)

@@ -20,10 +20,14 @@ DeepSeek Harness 插件。用官方 Antigravity CLI（`agy acp`）把 Gemini 3.8
 
 ## 它做什么
 
-- 在模型列表里提供 `antigravity` / `gemini-3.8-flash`。
+- 在模型列表里提供 Gemini 3.8 Flash。同一份插件可以登记多条路线，每条路线是一个模型、一台远端机器、一个登录。
 - 多个 DSH 会话可以同时使用这个模型。每个 ACP 会话有自己的 worker。
 - 断线或空闲之后，优先恢复原来的 ACP 会话，而不是整段重放。
 - 设置里有一节「Antigravity 订阅」；输入框在选中 Gemini 时显示剩余额度。
+
+## 拓展
+
+路线写在本机配置里，不写进仓库。聊天、工具回传和额度展示都走同一段代码：加一条路线不会分出第二套插件。设置页按路线各显示一行额度，输入框只显示当前选中的那一条。某条路线没有额度桥时，聊天不受影响。
 
 ## 它不做什么
 
@@ -77,6 +81,7 @@ npm test
 
 | 文档 | 内容 |
 | --- | --- |
+| [docs/setup.md](docs/setup.md) | 怎样复现整套路线，不含任何一台机器的秘密 |
 | [docs/architecture.md](docs/architecture.md) | 现在的结构 |
 | [docs/configuration.md](docs/configuration.md) | 本机配置和环境变量 |
 | [docs/decisions.md](docs/decisions.md) | 已经定下来的取舍 |

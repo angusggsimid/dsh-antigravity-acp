@@ -2,6 +2,8 @@
 
 仓库里没有某台机器的默认值。连接信息放在本机文件 `~/.dsh/antigravity-acp.local.json`，不要提交。同名环境变量优先于这个文件。示例见仓库根目录的 `antigravity-acp.local.example.json`。
 
+一条路线用下面的平铺字段。多条路线时改用 `routes` 数组，每一项都是同样的字段（`sshHost`、`sshKey`、`mcpPort`、`quotaUrl`、`quotaCredential`，以及可选的 `home` 和 `agent`）。插件不会为某一条路线另写一套行为。
+
 ## 本机文件
 
 | 字段 | 作用 |
