@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Antigravity ACP",
-    "description": "Runs Gemini through the official Antigravity ACP server over SSH, with tools executed locally. Also shows the subscription quota in Settings and beside the model selector."
+    "description": "Runs Gemini through the official Antigravity ACP server over SSH. Tool calls return over a reverse tunnel and run locally. Quota appears in Settings and beside the composer."
   }
 }

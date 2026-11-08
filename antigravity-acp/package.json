@@ -2,8 +2,17 @@
   "name": "@local/dsh-antigravity-acp",
   "version": "5.4.3",
   "private": true,
+  "license": "MIT",
   "type": "module",
-  "description": "Gemini (AI Pro) through the official Antigravity ACP server, plus the subscription quota panel and composer badge.",
+  "description": "Gemini (AI Pro) through the official Antigravity ACP server over SSH. Tools run locally. Shows the subscription quota in Settings and beside the composer.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/angusggsimid/dsh-antigravity-acp.git"
+  },
+  "homepage": "https://github.com/angusggsimid/dsh-antigravity-acp#readme",
+  "bugs": {
+    "url": "https://github.com/angusggsimid/dsh-antigravity-acp/issues"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
