@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Antigravity ACP",
+    "description": "通过 SSH 上的官方 Antigravity ACP 运行 Gemini，工具在本机执行。设置里可查看订阅额度，选中 Gemini 时在输入框显示剩余额度。"
+  }
+}

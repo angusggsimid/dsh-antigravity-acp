@@ -1,0 +1,9 @@
+{
+  "sshHost": "user@host",
+  "sshKey": "/path/to/private-key",
+  "mcpPort": 0,
+  "quotaUrl": "http://127.0.0.1:<port>",
+  "quotaCredential": "name-in-the-harness-credential-store",
+  "clientName": "dsh",
+  "screenshotDir": ""
+}

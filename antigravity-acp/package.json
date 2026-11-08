@@ -1,0 +1,39 @@
+{
+  "name": "@local/dsh-antigravity-acp",
+  "version": "5.4.3",
+  "private": true,
+  "type": "module",
+  "description": "Gemini (AI Pro) through the official Antigravity ACP server, plus the subscription quota panel and composer badge.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "quota.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-model-selection"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node test/adapter.test.mjs && node test/capacity.test.mjs && node test/recovery.test.mjs && node test/model-switch.test.mjs && node test/turn-fence.test.mjs && node test/features.test.mjs && node test/prompt-shape.test.mjs",
+    "test:real": "node test/real-host.mjs"
+  }
+}

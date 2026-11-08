@@ -1,0 +1,10 @@
+.DS_Store
+node_modules/
+*.bak
+*.bak-*
+*.log
+npm-debug.log*
+antigravity-acp.local.json
+*.local.json
+!.local.example.json
+!antigravity-acp.local.example.json

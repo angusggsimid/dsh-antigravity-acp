@@ -1,0 +1,3 @@
+- insert:
+    - id: antigravity-acp
+      name: '@local/dsh-antigravity-acp'
