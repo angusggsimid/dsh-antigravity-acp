@@ -104,6 +104,12 @@ const RESUME = process.env.DSH_AGY_RESUME !== '0'
 const CWD = process.env.DSH_AGY_CWD || ''
 const SESSION_STORE = process.env.DSH_AGY_SESSION_STORE || join(homedir(), '.dsh', 'cache', 'antigravity-acp', 'sessions.json')
 /**
+ * One instance for every route. Two stores on one file each hold their own copy
+ * and rewrite the whole file, so a save from one route silently dropped the
+ * other route's entries — and with them the ACP session ids used for resume.
+ */
+let sharedStore
+/**
  * Replay budget in BYTES, not characters. An unpatched `agy` truncates a single
  * USER_INPUT at 64,000 * 3 = 192,000 bytes, so a char-based 120k budget can be
  * 360KB of UTF-8 for Chinese text and get silently tail-truncated.
@@ -1206,13 +1212,15 @@ class Runtime {
     this.tunnelStderr = ''
     this.tunnelAttempts = 0
     this.tunnelRestart = undefined
-    /** True only after the remote host can actually reach this route's MCP port. */
+    /** True only while the remote host can actually reach this route's MCP port. */
     this.tunnelVerified = false
+    this.tunnelSpawned = undefined
     this.attachments = undefined
     this.sweeper = undefined
     this.ready = undefined
     this.stopping = false
-    this.store = new SessionStore(SESSION_STORE)
+    sharedStore ??= new SessionStore(SESSION_STORE)
+    this.store = sharedStore
     /** Shared `agy acp` front process. */
     this.link = undefined
     /** Isolated `--gemini-dir` and bridge agent on the remote host. */
@@ -1330,55 +1338,96 @@ class Runtime {
   }
 
   /**
-   * One tunnel per route. The process being alive is not enough: agy dials the
-   * forwarded port from the remote host, and a prompt sent before that dial
-   * works is answered with no tools.
+   * One tunnel per route. The ssh process being alive is not enough: agy dials
+   * the forwarded port from the remote host, and a prompt sent before that dial
+   * works is answered with no tools at all.
+   *
+   * `verify` decides whether to repeat the remote probe. A cached success used
+   * to live forever, so a forward that died without killing ssh sailed through
+   * the gate and took the turn with it.
    */
-  async #ensureTunnel() {
-    if (NO_TUNNEL) { this.tunnelVerified = true; return }
+  async ensureReachable({ verify = true } = {}) {
+    if (NO_TUNNEL || ACP_COMMAND) return
     requireSsh(this.route)
-    if (!(this.tunnel && this.tunnel.exitCode == null)) {
-      this.tunnelVerified = false
-      this.tunnelStderr = ''
-      this.tunnel = spawn('ssh', [...sshOptions(this.route), '-o', 'ExitOnForwardFailure=yes', '-N',
-        '-R', `127.0.0.1:${this.port}:127.0.0.1:${this.port}`, this.route.sshHost], { stdio: ['ignore', 'ignore', 'pipe'] })
-      this.tunnel.stderr.on('data', (chunk) => { this.tunnelStderr = (this.tunnelStderr + chunk.toString()).slice(-2000) })
-      this.tunnel.on('error', (error) => log(this.ctx, `${this.route.provider} reverse tunnel spawn error: ${error instanceof Error ? error.message : error}`))
-      this.tunnel.on('exit', (code) => this.#onTunnelExit(code))
-      await new Promise((resolve) => setTimeout(resolve, 700))
+    const alive = this.tunnel !== undefined && this.tunnel.exitCode == null
+    if (alive && !verify) return
+    if (!alive) await this.#tunnelSpawn()
+    if (verify || !this.tunnelVerified) await this.#verifyTunnel()
+  }
+
+  async #ensureTunnel() {
+    await this.ensureReachable({ verify: true })
+  }
+
+  /** One spawn at a time: two callers used to leave an orphan ssh holding the port. */
+  #tunnelSpawn() {
+    if (this.tunnelSpawned !== undefined) return this.tunnelSpawned
+    this.tunnelSpawned = this.#spawnTunnel().finally(() => { this.tunnelSpawned = undefined })
+    return this.tunnelSpawned
+  }
+
+  async #spawnTunnel() {
+    this.tunnelVerified = false
+    this.tunnelStderr = ''
+    const child = spawn('ssh', [...sshOptions(this.route), '-o', 'ExitOnForwardFailure=yes', '-N',
+      '-R', `127.0.0.1:${this.port}:127.0.0.1:${this.port}`, this.route.sshHost], { stdio: ['ignore', 'ignore', 'pipe'] })
+    this.tunnel = child
+    child.stderr.on('data', (chunk) => { this.tunnelStderr = (this.tunnelStderr + chunk.toString()).slice(-2000) })
+    child.on('error', (error) => log(this.ctx, `${this.route.provider} reverse tunnel spawn error: ${error instanceof Error ? error.message : error}`))
+    child.on('exit', (code) => this.#onTunnelExit(code))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    if (child.exitCode != null) {
+      throw new Error(`reverse tunnel failed: ${this.tunnelStderr.slice(-400)}`)
+    }
+  }
+
+  async #verifyTunnel() {
+    // A fresh host often needs more than a second before the remote port listens.
+    // Probing only four times at 400ms reported a live tunnel that was not ready.
+    const deadline = Date.now() + 15_000
+    while (Date.now() < deadline) {
       if (this.tunnel?.exitCode != null) {
         throw new Error(`reverse tunnel failed: ${this.tunnelStderr.slice(-400)}`)
       }
-    }
-    if (this.tunnelVerified) return
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      if (await this.#probeTunnel()) {
+      const probed = await this.#probeTunnel()
+      if (probed === true) {
         this.tunnelVerified = true
         log(this.ctx, `${this.route.provider} tunnel ready on ${this.port}`)
         return
       }
-      await new Promise((resolve) => setTimeout(resolve, 400))
+      if (probed === 'unverifiable') {
+        // No python3, curl, or nc on the remote host. Assume the tunnel is up
+        // instead of refusing every turn; a broken relay still fails loudly.
+        this.tunnelVerified = true
+        log(this.ctx, `${this.route.provider} tunnel not verified: the remote host has no python3, curl, or nc`)
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500))
     }
+    try { this.tunnel?.kill('SIGTERM') } catch { /* already gone */ }
+    this.tunnel = undefined
+    this.tunnelVerified = false
     throw new Error(`${this.route.providerName} reverse tunnel is up but the remote host cannot reach the local tool bridge`)
   }
 
   /** Ask the remote host to open this route's forwarded health URL. */
   #probeTunnel() {
     return new Promise((resolve) => {
-      const child = spawn('ssh', [...sshOptions(this.route), '-T', this.route.sshHost, '--',
-        `python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:${this.port}/health", timeout=4).read()'`],
-      { stdio: ['ignore', 'ignore', 'pipe'] })
+      const url = `http://127.0.0.1:${this.port}/health`
+      const script = [
+        `if command -v python3 >/dev/null 2>&1; then python3 -c 'import urllib.request;urllib.request.urlopen("${url}",timeout=4).read()';`,
+        `elif command -v curl >/dev/null 2>&1; then curl -fsS --max-time 4 -o /dev/null "${url}";`,
+        `elif command -v nc >/dev/null 2>&1; then nc -z 127.0.0.1 ${this.port};`,
+        'else exit 2; fi',
+      ].join(' ')
+      const child = spawn('ssh', [...sshOptions(this.route), '-T', this.route.sshHost, '--', script], { stdio: ['ignore', 'ignore', 'pipe'] })
       const timer = setTimeout(() => { try { child.kill('SIGTERM') } catch { /* gone */ } resolve(false) }, 12_000)
       child.on('error', () => { clearTimeout(timer); resolve(false) })
-      child.on('exit', (code) => { clearTimeout(timer); resolve(code === 0) })
+      child.on('exit', (code) => {
+        clearTimeout(timer)
+        resolve(code === 0 ? true : code === 2 ? 'unverifiable' : false)
+      })
     })
-  }
-
-  /** Block a turn until this model's own tunnel can carry tool calls. */
-  async ensureReachable() {
-    if (NO_TUNNEL || ACP_COMMAND) return
-    if (this.tunnelVerified && this.tunnel && this.tunnel.exitCode == null) return
-    await this.#ensureTunnel()
   }
 
   #onTunnelExit(code) {
@@ -1728,10 +1777,12 @@ class Runtime {
   }
 
   async *#streamLocked(conversation, options) {
-    await this.ensureReachable()
     const tools = options.tools ?? []
     const messages = options.messages ?? []
     const continued = continuationResults(messages, conversation)
+    // A new user turn re-probes the tunnel; a tool-result continuation only needs
+    // the ssh process to be alive. A 70-step turn must not pay 70 probes.
+    await this.ensureReachable({ verify: !continued })
     if (!continued) {
       // Fence the turn first: cancel anything still in flight and make every
       // buffered event from the previous turn unreachable.
