@@ -34,7 +34,9 @@ function routeFrom(raw, index) {
     id: String(source.id || (index === 0 ? 'primary' : `route-${index + 1}`)),
     provider: String(source.provider || (index === 0 ? 'antigravity' : `antigravity-${index + 1}`)),
     providerName: String(source.providerName || (index === 0 ? 'Gemini (AI Pro)' : `Gemini (AI Pro ${index + 1})`)),
-    modelId: 'gemini-3.8-flash',
+    // Whatever id `agy` accepts on that host. The default is the one this plugin
+    // was brought up on; the tunnel and the tool path do not change with it.
+    modelId: String(source.modelId || 'gemini-3.8-flash'),
     modelName: String(source.modelName || 'Gemini 3.8 Flash'),
     sshHost: String(source.sshHost || ''),
     sshKey: String(source.sshKey || ''),

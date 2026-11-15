@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="248" viewBox="0 0 920 248" role="img" aria-label="One plugin, several routes">
+  <rect width="920" height="248" rx="16" fill="#f4f6f8"/>
+  <g font-family="ui-sans-serif, system-ui, sans-serif">
+    <rect x="28" y="78" width="200" height="92" rx="12" fill="#111827"/>
+    <text x="128" y="118" fill="#ffffff" font-size="15" font-weight="650" text-anchor="middle">one plugin</text>
+    <text x="128" y="140" fill="#9ca3af" font-size="12" text-anchor="middle">same tunnel, same tools</text>
+    <g>
+      <rect x="300" y="24" width="280" height="58" rx="10" fill="#ffffff" stroke="#d1d5db"/>
+      <text x="320" y="48" fill="#111827" font-size="14" font-weight="650">route A</text>
+      <text x="320" y="68" fill="#6b7280" font-size="12">modelId · host · sign-in</text>
+    </g>
+    <g>
+      <rect x="300" y="96" width="280" height="58" rx="10" fill="#ffffff" stroke="#d1d5db"/>
+      <text x="320" y="120" fill="#111827" font-size="14" font-weight="650">route B</text>
+      <text x="320" y="140" fill="#6b7280" font-size="12">another model, or another account</text>
+    </g>
+    <g>
+      <rect x="300" y="168" width="280" height="58" rx="10" fill="#ffffff" stroke="#d1d5db"/>
+      <text x="320" y="192" fill="#111827" font-size="14" font-weight="650">route C</text>
+      <text x="320" y="212" fill="#6b7280" font-size="12">whatever id agy accepts</text>
+    </g>
+    <path d="M228 124 H300" stroke="#9ca3af" stroke-width="1.5"/>
+    <path d="M268 52 V197" stroke="#9ca3af" stroke-width="1.5"/>
+    <path d="M268 53 H300" stroke="#9ca3af" stroke-width="1.5"/>
+    <path d="M268 197 H300" stroke="#9ca3af" stroke-width="1.5"/>
+    <text x="620" y="118" fill="#111827" font-size="14" font-weight="650">default</text>
+    <text x="620" y="140" fill="#6b7280" font-size="13">gemini-3.8-flash</text>
+    <text x="620" y="168" fill="#111827" font-size="14" font-weight="650">change</text>
+    <text x="620" y="190" fill="#6b7280" font-size="13">set modelId on the route</text>
+  </g>
+</svg>

@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.5.11
+
+- 路线可以写 `modelId`。默认仍是 `gemini-3.8-flash`；Antigravity CLI 接受的其他模型 id 用同一条隧道。之前这个 id 写死，只有显示名能改。
+- README 改成这个说法，并加了两张路径图。
+
 ## 5.5.10
 
 - 本机额度隧道的看护加了安装脚本和 LaunchAgent 模板（`scripts/install-local-watch.sh`、`scripts/launchd/`），换一台 Mac 不用手写 plist。

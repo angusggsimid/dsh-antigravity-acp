@@ -6,7 +6,9 @@
 
 ## 多台机器
 
-`routes` 里每一项是一条独立的隧道：自己的 SSH 主机、自己的密钥、自己的本机端口、自己的 `agy` 进程。模型选择器里选哪一项，就只用那一条。两项的 `provider` 不能相同。`modelName` 如果一样，选择器会自动加上 `providerName` 来区分。
+`routes` 里每一项是一条独立的隧道：自己的 SSH 主机、自己的密钥、自己的本机端口、自己的 `agy` 进程，以及自己的模型。模型选择器里选哪一项，就只用那一条。两项的 `provider` 不能相同。`modelName` 如果一样，选择器会自动加上 `providerName` 来区分。
+
+`modelId` 是交给 `agy` 的模型 id，默认 `gemini-3.8-flash`。Antigravity CLI 在那台机器上接受哪个 id，就写哪个；隧道、工具和额度不跟着变。`modelName` 只是选择器里的名字。
 
 没有 `routes` 时，文件顶层的 `sshHost` / `sshKey` 仍表示唯一的一条。
 
@@ -14,6 +16,8 @@
 
 | 字段 | 作用 |
 | --- | --- |
+| `modelId` | 交给 `agy` 的模型 id。默认 `gemini-3.8-flash` |
+| `modelName` | 模型选择器里显示的名字。默认 `Gemini 3.8 Flash` |
 | `sshHost` | 远端 `user@host`。不设就不能连 SSH |
 | `sshKey` | SSH 私钥路径。不设就不能连 SSH |
 | `mcpPort` | 本机 MCP 回环端口。`0` 表示由系统分配 |

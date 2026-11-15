@@ -2,9 +2,15 @@
 
 [中文](README.md)
 
-A DeepSeek Harness plugin that runs Gemini 3.8 Flash through the official Antigravity CLI (`agy acp`). Google only sees that official process. File and command tools still run on the machine where DeepSeek Harness is running.
+A DeepSeek Harness plugin that runs Gemini through the official Antigravity CLI (`agy acp`). Google only sees that official process. File and command tools still run on the machine where DeepSeek Harness is running.
+
+The default model is Gemini 3.8 Flash. Set `modelId` on a route to any model id that the Antigravity CLI on that host accepts. Changing the model does not change the tunnel or the tool path.
 
 While this model is selected, Settings and the composer show the 5-hour and weekly windows of the Antigravity subscription quota.
+
+![How a request moves](docs/images/flow.svg)
+
+![One plugin, several routes](docs/images/routes.svg)
 
 The code lives in [`antigravity-acp/`](antigravity-acp/). The repository root `package.json` points at that directory, so the repository URL is enough to install. Local development can still `link:` that directory.
 
@@ -20,7 +26,7 @@ It does not sign you in to Google, and it does not ship a host, a key, or a port
 
 ## What it does
 
-- Registers Gemini 3.8 Flash. One plugin can register several routes. Each route is one model, one remote machine, and one sign-in.
+- Registers a Gemini route. The default model is Gemini 3.8 Flash. One plugin can register several routes. Each route is one `modelId`, one remote machine, and one sign-in.
 - Lets more than one DeepSeek Harness session use the model at once. Each ACP session has its own worker.
 - Resumes the previous ACP session after idle time or a dropped connection, instead of replaying the whole transcript.
 - Rebuilds that session on the next turn when a tool call comes back `unknown tool`: the tunnel is verified first, then the current conversation is replayed into a new session. At most two rebuilds per conversation, so a genuinely broken route still fails loudly instead of reconnecting forever.

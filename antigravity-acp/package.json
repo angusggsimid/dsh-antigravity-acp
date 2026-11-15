@@ -1,10 +1,10 @@
 {
   "name": "@local/dsh-antigravity-acp",
-  "version": "5.5.10",
+  "version": "5.5.11",
   "private": true,
   "license": "MIT",
   "type": "module",
-  "description": "Gemini (AI Pro) through the official Antigravity ACP server over SSH. Tools run locally. Shows the subscription quota in Settings and beside the composer.",
+  "description": "Gemini through the official Antigravity ACP server over SSH. Any model id that agy accepts; Gemini 3.8 Flash is the default. Tools run locally. Shows the subscription quota.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/angusggsimid/dsh-antigravity-acp.git"

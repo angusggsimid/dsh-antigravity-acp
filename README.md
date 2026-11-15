@@ -2,9 +2,15 @@
 
 [English](README.en.md)
 
-DeepSeek Harness 插件。用官方 Antigravity CLI（`agy acp`）把 Gemini 3.8 Flash 接进 DSH。发往 Google 的请求由官方进程发出。读文件、跑命令这些工具仍在运行 DSH 的这台机器上执行。
+DeepSeek Harness 插件。用官方 Antigravity CLI（`agy acp`）把 Gemini 接进 DSH。发往 Google 的请求由官方进程发出。读文件、跑命令这些工具仍在运行 DSH 的这台机器上执行。
+
+默认模型是 Gemini 3.8 Flash。Antigravity CLI 在那台机器上接受哪个模型 id，就在路线的 `modelId` 里写哪个。换模型不换隧道，也不换工具路径。
 
 选中这个模型时，设置页和输入框旁会显示订阅额度里的 5 小时窗口和每周窗口。
+
+![请求怎么走](docs/images/flow.svg)
+
+![一条插件，多条路线](docs/images/routes.svg)
 
 代码在 [`antigravity-acp/`](antigravity-acp/)。仓库根目录的 `package.json` 指向这个目录，所以按仓库地址安装即可。本机开发仍可 `link:` 到该目录。
 
@@ -20,7 +26,7 @@ DeepSeek Harness 插件。用官方 Antigravity CLI（`agy acp`）把 Gemini 3.8
 
 ## 它做什么
 
-- 在模型列表里提供 Gemini 3.8 Flash。同一份插件可以登记多条路线，每条路线是一个模型、一台远端机器、一个登录。
+- 在模型列表里提供一条 Gemini 路线，默认是 Gemini 3.8 Flash。同一份插件可以登记多条路线，每条路线是一个 `modelId`、一台远端机器、一个登录。
 - 多个 DSH 会话可以同时使用这个模型。每个 ACP 会话有自己的 worker。
 - 断线或空闲之后，优先恢复原来的 ACP 会话，而不是整段重放。
 - 工具被退回 `unknown tool` 时，下一轮自动换一个新的 ACP 会话：先确认反向隧道可通，再把当前对话重放进去。每个会话最多重建两次，之后照常失败并报错，不会无限重连。

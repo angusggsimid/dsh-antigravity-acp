@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="220" viewBox="0 0 920 220" role="img" aria-label="Request path">
+  <rect width="920" height="220" rx="16" fill="#f4f6f8"/>
+  <g font-family="ui-sans-serif, system-ui, sans-serif" text-anchor="middle">
+    <g>
+      <rect x="28" y="58" width="168" height="78" rx="12" fill="#111827"/>
+      <text x="112" y="92" fill="#ffffff" font-size="15" font-weight="650">DeepSeek Harness</text>
+      <text x="112" y="114" fill="#9ca3af" font-size="12">this machine</text>
+    </g>
+    <g>
+      <rect x="268" y="58" width="150" height="78" rx="12" fill="#ffffff" stroke="#d1d5db"/>
+      <text x="343" y="92" fill="#111827" font-size="15" font-weight="650">SSH</text>
+      <text x="343" y="114" fill="#6b7280" font-size="12">your host</text>
+    </g>
+    <g>
+      <rect x="490" y="58" width="176" height="78" rx="12" fill="#ffffff" stroke="#d1d5db"/>
+      <text x="578" y="92" fill="#111827" font-size="15" font-weight="650">agy acp</text>
+      <text x="578" y="114" fill="#6b7280" font-size="12">official client</text>
+    </g>
+    <g>
+      <rect x="728" y="46" width="164" height="102" rx="12" fill="#111827"/>
+      <text x="810" y="86" fill="#ffffff" font-size="15" font-weight="650">Google</text>
+      <text x="810" y="108" fill="#9ca3af" font-size="12">sees only agy</text>
+    </g>
+    <path d="M196 90 H268" stroke="#9ca3af" stroke-width="1.5" marker-end="url(#a)"/>
+    <path d="M418 90 H490" stroke="#9ca3af" stroke-width="1.5" marker-end="url(#a)"/>
+    <path d="M666 90 H728" stroke="#9ca3af" stroke-width="1.5" marker-end="url(#a)"/>
+    <path d="M578 136 C578 176, 112 176, 112 136" fill="none" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#b)"/>
+    <text x="345" y="198" fill="#2563eb" font-size="12">tool calls return over a reverse tunnel and run here</text>
+  </g>
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0 0 L7 3 L0 6 Z" fill="#9ca3af"/>
+    </marker>
+    <marker id="b" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0 0 L7 3 L0 6 Z" fill="#2563eb"/>
+    </marker>
+  </defs>
+</svg>
