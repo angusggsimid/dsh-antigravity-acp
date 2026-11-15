@@ -214,7 +214,8 @@ const sshOptions = (route) => [
   '-o', 'BatchMode=yes',
   '-o', 'ConnectTimeout=12',
   '-o', 'ServerAliveInterval=15',
-  '-o', 'ServerAliveCountMax=4',
+  '-o', 'ServerAliveCountMax=3',
+  '-o', 'TCPKeepAlive=yes',
 ]
 
 function log(ctx, message) {
@@ -381,6 +382,11 @@ class Link {
     // A rejected `ready` used to stick forever, bricking every later turn.
     this.ready = this.#start().catch((error) => {
       this.ready = undefined
+      // initialize failed after the process was spawned: drop it, or the next
+      // attempt adds a second `agy` and leaves this one running on the host.
+      if (this.child && this.child.exitCode == null) {
+        try { this.child.kill('SIGTERM') } catch { /* already gone */ }
+      }
       throw error
     })
     return this.ready
@@ -396,7 +402,14 @@ class Link {
       for (const pending of this.pending.values()) pending.reject(error)
       this.pending.clear()
     }
+    const previous = this.child
     const epoch = ++this.epoch
+    // A new front must replace the old one. Overwriting `this.child` without
+    // killing it is how a host ends up with several `agy acp` processes, each
+    // holding ~170 MB, after a tunnel rotation or a failed handshake.
+    if (previous && previous.exitCode == null) {
+      try { previous.kill('SIGTERM') } catch { /* already gone */ }
+    }
     // One front process for every session. `--process-per-session` gives each ACP
     // session an isolated worker inside it, so concurrent DSH sessions no longer
     // need a separate agy process and SSH channel each.
@@ -1504,6 +1517,9 @@ class Runtime {
       }
       throw error
     }
+    // Never overwrite a live forward. The old exit must not be treated as a
+    // crash either: #onTunnelExit ignores a child that is no longer this.tunnel.
+    this.#killTunnel()
     this.spawns.push(now)
     this.tunnelVerified = false
     this.tunnelStderr = ''
@@ -1512,7 +1528,10 @@ class Runtime {
     this.tunnel = child
     child.stderr.on('data', (chunk) => { this.tunnelStderr = (this.tunnelStderr + chunk.toString()).slice(-2000) })
     child.on('error', (error) => log(this.ctx, `${this.route.provider} reverse tunnel spawn error: ${error instanceof Error ? error.message : error}`))
-    child.on('exit', (code) => this.#onTunnelExit(code))
+    child.on('exit', (code) => {
+      if (this.tunnel !== child) return
+      this.#onTunnelExit(code)
+    })
     await new Promise((resolve) => setTimeout(resolve, 700))
     if (child.exitCode != null) {
       throw new Error(`reverse tunnel failed: ${this.tunnelStderr.slice(-400)}`)

@@ -28,7 +28,9 @@ GUARD_BIN="/usr/local/sbin/antigravity-guard"
 STATE_DIR="/run/antigravity-guard"
 MEM_WARN_MB="${MEM_WARN_MB:-200}"
 MEM_FREE_MB="${MEM_FREE_MB:-400}"
-AGY_MAX="${AGY_MAX:-4}"
+# One `agy acp` front per host. Session workers are inside that process; a second
+# copy is a leaked SSH session, not more capacity.
+AGY_MAX="${AGY_MAX:-1}"
 MEM_REBOOT_MB="${MEM_REBOOT_MB:-80}"
 DISK_WARN_PCT="${DISK_WARN_PCT:-85}"
 SSHD_PROBE_TIMEOUT="${SSHD_PROBE_TIMEOUT:-4}"
@@ -64,6 +66,21 @@ vm.swappiness = 10
 vm.vfs_cache_pressure = 50
 EOF
 sysctl --system >/dev/null
+
+# A dead client used to leave its sshd session, and the agy process under it,
+# until the host was rebooted. Two missed keepalives and the session is closed.
+if grep -q 'sshd_config.d' /etc/ssh/sshd_config 2>/dev/null; then
+  cat > /etc/ssh/sshd_config.d/99-antigravity-keepalive.conf <<'EOF'
+ClientAliveInterval 30
+ClientAliveCountMax 3
+EOF
+  if sshd -t 2>/dev/null; then
+    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+    say "sshd keepalive: 30s x 3"
+  else
+    say "sshd config rejected the keepalive drop-in; left it in place for inspection"
+  fi
+fi
 
 # --------------------------------------------------------- 2. log budgets
 install -d /etc/systemd/journald.conf.d
@@ -143,17 +160,30 @@ for pid in \$pids; do
     kill -TERM "\$pid" 2>/dev/null && { reaped=\$((reaped + 1)); act "reaped-orphan pid=\$pid"; }
   fi
 done
-# A leaked ACP session is invisible to the client, but its worker still holds
-# memory, and its parent is the live front — the orphan test above never sees it.
-# Under a budget there is only one thing to do with the extras: end the oldest.
+# One front per host. Anything beyond AGY_MAX is a leaked SSH session whose
+# client already went away. Keep the newest, and leave a process younger than
+# 45s alone so a handover can overlap for one cycle.
 if [ "\$agy" -gt "\$AGY_MAX" ]; then
-  excess=\$((agy - AGY_MAX))
-  for pid in \$(ps -eo pid=,etimes=,args= | awk '/agy acp/ && !/awk/ {print \$1, \$2}' | sort -k2 -nr | head -n "\$excess" | cut -d' ' -f1); do
+  kept=0
+  for pid in \$(ps -eo pid=,etimes=,args= | awk '/agy acp/ && !/awk/ {print \$2, \$1}' | sort -n | awk '{print \$2}'); do
+    if [ "\$kept" -lt "\$AGY_MAX" ]; then kept=\$((kept + 1)); continue; fi
+    age=\$(ps -o etimes= -p "\$pid" 2>/dev/null | tr -d ' ')
+    [ "\${age:-0}" -lt 45 ] && continue
     kill -TERM "\$pid" 2>/dev/null && act "capped-worker pid=\$pid agy=\$agy cap=\$AGY_MAX"
   done
   sleep 2
   agy=\$(pgrep -fc '[a]gy acp' 2>/dev/null || true)
   mem_avail=\$(awk '/^MemAvailable:/{print int(\$2/1024)}' /proc/meminfo)
+fi
+# An sshd session with no established socket is a leftover from a client that
+# disappeared (remote reboot, dropped network). The listener is not a session.
+for pid in \$(ps -eo pid=,etimes=,args= | awk '/sshd:/ && !/listener/ && !/sshd: \\/usr/ && \$2+0 >= 180 {print \$1}'); do
+  ppid=\$(awk '{print \$4}' "/proc/\$pid/stat" 2>/dev/null || echo 0)
+  if ss -tnp state established 2>/dev/null | grep -Eq "pid=\${pid},|pid=\${ppid},"; then continue; fi
+  kill -TERM "\$pid" 2>/dev/null && act "reaped-ghost-sshd pid=\$pid"
+done
+if ! systemctl is-active --quiet gemini-bridge 2>/dev/null; then
+  systemctl start gemini-bridge 2>/dev/null && act "started-gemini-bridge"
 fi
 if [ "\$mem_avail" -lt "\$MEM_FREE_MB" ] && [ "\$agy" -gt 0 ]; then
   # Nearly out of memory: end the largest worker rather than let the box freeze.

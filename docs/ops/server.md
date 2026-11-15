@@ -32,7 +32,9 @@
 | 情况 | 自动动作 |
 |---|---|
 | `agy acp` 的父进程已经不在 | 结束它。`sshd` 正常会在会话结束时收掉，父进程变成 1 说明没收掉，这类 worker 会一直占内存到下次重启 |
-| worker 数超过 `AGY_MAX`（默认 4） | 结束最老的几个。泄漏的 ACP 会话对客户端不可见，但它的 worker 仍占内存，而且父进程是正常的 `agy` 前端，靠「父进程已死」抓不到 |
+| `agy acp` 超过 `AGY_MAX`（默认 1，即一台机器一个前端） | 保留最新的，结束更老的。多出来的是没被客户端收掉的 SSH 会话，每个大约 170MB。不足 45 秒的先留着，避免交接时误杀 |
+| sshd 会话超过 3 分钟且没有已建立的 TCP 连接 | 结束这个会话。远端重启或网络断开后，会话会变成这种空壳 |
+| `gemini-bridge` 没在跑 | 拉起来。额度服务自己也配了 `Restart=always` |
 | 可用内存 < 400M | 按 RSS 从大到小结束 worker，直到回到 400M 以上（最多 3 个）。被结束的那条 ACP 会话会在插件下一轮重建 |
 | 磁盘占用 ≥ 85% | 收缩 journald 到 100M、删掉 3 天前的 `.gz` 日志、清空轮转中的看护日志 |
 | 端口 22 连续两次拿不到 SSH banner | 重启 `sshd`，并验证它恢复应答。30 分钟内最多 3 次，防止重启循环 |
@@ -85,7 +87,7 @@ tail -5 /var/log/antigravity-guard.log
 | `SWAP_SIZE` | `2G` | 新建 swap 的大小 |
 | `MEM_WARN_MB` | `200` | 可用内存低于它记 warn |
 | `MEM_FREE_MB` | `400` | 低于它开始结束 worker |
-| `AGY_MAX` | `4` | worker 数上限，超出就结束最老的 |
+| `AGY_MAX` | `1` | 每台机器保留的 `agy acp` 前端数，多出来的是泄漏的 SSH 会话，结束最老的。交接过程中不足 45 秒的进程先留着 |
 | `MEM_REBOOT_MB` | `80` | 低于它且 sshd 无应答时重启机器 |
 | `DISK_WARN_PCT` | `85` | 磁盘占用超过它记 warn 并清日志 |
 | `SSHD_PROBE_TIMEOUT` | `4` | banner 探测的超时秒数 |
@@ -104,6 +106,20 @@ tail -5 /var/log/antigravity-guard.log
 - 唯一没有自动答案的情况是**整台实例彻底失联**（宿主机故障、网络中断）。那种情况机器自身
   无法上报，任何告警都只是通知人——如果要求完全不需要人，就别配告警，接受这一种情况由
   云厂商兜底。
+
+## 本机的额度隧道
+
+额度面板走的是本机 `ssh -L`（`com.agg.gemini-bridge-tunnel` 和 `-tunnel-2`），不是插件建的那条反向隧道。launchd 只在进程退出后才拉起新的。远端重启后可能出现：进程还在、本地端口已经不听，面板就一直 `fetch failed`。
+
+[`scripts/local-tunnel-watch.sh`](../../scripts/local-tunnel-watch.sh) 每 30 秒检查每个 `-L` 端口。端口不回答就杀掉对应的 ssh，让 launchd 的 KeepAlive 重新连。同一个端口 3 分钟内只杀一次，避免远端额度服务真挂了的时候来回重启。
+
+```sh
+cp scripts/local-tunnel-watch.sh ~/.dsh/antigravity-tunnel-watch.sh
+chmod +x ~/.dsh/antigravity-tunnel-watch.sh
+# LaunchAgent com.agg.antigravity-tunnel-watch，StartInterval 30
+```
+
+两条隧道的 ssh 还带 `ServerAliveInterval=15`、`ServerAliveCountMax=2`、`TCPKeepAlive=yes`。对端没响应时大约 30 秒进程自己退出，不必等到看护来杀。
 
 ## 卸载
 
