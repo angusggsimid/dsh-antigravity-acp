@@ -27,7 +27,8 @@ GUARD_LOG="/var/log/antigravity-guard.log"
 GUARD_BIN="/usr/local/sbin/antigravity-guard"
 STATE_DIR="/run/antigravity-guard"
 MEM_WARN_MB="${MEM_WARN_MB:-200}"
-MEM_FREE_MB="${MEM_FREE_MB:-150}"
+MEM_FREE_MB="${MEM_FREE_MB:-400}"
+AGY_MAX="${AGY_MAX:-4}"
 MEM_REBOOT_MB="${MEM_REBOOT_MB:-80}"
 DISK_WARN_PCT="${DISK_WARN_PCT:-85}"
 SSHD_PROBE_TIMEOUT="${SSHD_PROBE_TIMEOUT:-4}"
@@ -105,6 +106,7 @@ LOG='$GUARD_LOG'
 STATE='$STATE_DIR'
 MEM_WARN_MB='$MEM_WARN_MB'
 MEM_FREE_MB='$MEM_FREE_MB'
+AGY_MAX='$AGY_MAX'
 MEM_REBOOT_MB='$MEM_REBOOT_MB'
 DISK_WARN_PCT='$DISK_WARN_PCT'
 SSHD_PROBE_TIMEOUT='$SSHD_PROBE_TIMEOUT'
@@ -141,6 +143,18 @@ for pid in \$pids; do
     kill -TERM "\$pid" 2>/dev/null && { reaped=\$((reaped + 1)); act "reaped-orphan pid=\$pid"; }
   fi
 done
+# A leaked ACP session is invisible to the client, but its worker still holds
+# memory, and its parent is the live front — the orphan test above never sees it.
+# Under a budget there is only one thing to do with the extras: end the oldest.
+if [ "\$agy" -gt "\$AGY_MAX" ]; then
+  excess=\$((agy - AGY_MAX))
+  for pid in \$(ps -eo pid=,etimes=,args= | awk '/agy acp/ && !/awk/ {print \$1, \$2}' | sort -k2 -nr | head -n "\$excess" | cut -d' ' -f1); do
+    kill -TERM "\$pid" 2>/dev/null && act "capped-worker pid=\$pid agy=\$agy cap=\$AGY_MAX"
+  done
+  sleep 2
+  agy=\$(pgrep -fc '[a]gy acp' 2>/dev/null || true)
+  mem_avail=\$(awk '/^MemAvailable:/{print int(\$2/1024)}' /proc/meminfo)
+fi
 if [ "\$mem_avail" -lt "\$MEM_FREE_MB" ] && [ "\$agy" -gt 0 ]; then
   # Nearly out of memory: end the largest worker rather than let the box freeze.
   # That ACP session is rebound by the plugin on its next turn.
