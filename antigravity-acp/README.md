@@ -8,7 +8,7 @@ DeepSeek Harness 插件包。通过 SSH 上的官方 `agy acp` 运行 Gemini，�
 - [../docs/configuration.md](../docs/configuration.md)
 - [../LICENSE](../LICENSE)
 
-本目录是 profile 里 `link:` 的目标。不要单独搬走，也不要发布到 npm。
+按仓库地址安装时用根目录的 `package.json`。本目录仍是 profile 里 `link:` 的目标。不要单独搬走，也不要发布到 npm。
 
 ```bash
 npm test

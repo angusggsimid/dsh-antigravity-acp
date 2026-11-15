@@ -6,7 +6,7 @@ DeepSeek Harness 插件。用官方 Antigravity CLI（`agy acp`）把 Gemini 3.8
 
 选中这个模型时，设置页和输入框旁会显示订阅额度里的 5 小时窗口和每周窗口。
 
-可安装的包在 [`antigravity-acp/`](antigravity-acp/)。DSH 通过其中的 `cordis.patch.yml` 加载。
+代码在 [`antigravity-acp/`](antigravity-acp/)。仓库根目录的 `package.json` 指向这个目录，所以按仓库地址安装即可。本机开发仍可 `link:` 到该目录。
 
 ## 它会动到什么
 
@@ -45,7 +45,15 @@ DeepSeek Harness 插件。用官方 Antigravity CLI（`agy acp`）把 Gemini 3.8
 
 ## 安装
 
-把仓库克隆到本机，在 DSH profile 的 `package.json` 里把包指到 `antigravity-acp/` 目录，并把它加进 `dsh.profile.bundles`：
+按仓库地址安装，把下面这一行加进 profile 的 `dependencies`，并把 `@local/dsh-antigravity-acp` 加进 `dsh.profile.bundles`：
+
+```json
+"@local/dsh-antigravity-acp": "github:angusggsimid/dsh-antigravity-acp"
+```
+
+命令行等价于 `dsh plugin --profile <profile> add github:angusggsimid/dsh-antigravity-acp`。桌面版的 profile 名是 `desktop`，不是 `web`。装完后重新加载 DSH。Host 侧的改动只刷新页面不够。
+
+本机改代码时，仍把依赖指到克隆下来的 `antigravity-acp/` 目录：
 
 ```json
 {

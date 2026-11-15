@@ -6,7 +6,7 @@ A DeepSeek Harness plugin that runs Gemini 3.8 Flash through the official Antigr
 
 While this model is selected, Settings and the composer show the 5-hour and weekly windows of the Antigravity subscription quota.
 
-The installable package is [`antigravity-acp/`](antigravity-acp/). DeepSeek Harness loads `cordis.patch.yml` from that directory.
+The code lives in [`antigravity-acp/`](antigravity-acp/). The repository root `package.json` points at that directory, so the repository URL is enough to install. Local development can still `link:` that directory.
 
 ## What it touches
 
@@ -45,7 +45,15 @@ Routes live in the local config file, not in the repository. Chat, tool transpor
 
 ## Install
 
-Clone this repository and point your DeepSeek Harness profile at the `antigravity-acp/` directory. Add the package to `dsh.profile.bundles`:
+Install from the repository URL. Add this dependency, and add `@local/dsh-antigravity-acp` to `dsh.profile.bundles`:
+
+```json
+"@local/dsh-antigravity-acp": "github:angusggsimid/dsh-antigravity-acp"
+```
+
+The same spec is `dsh plugin --profile <profile> add github:angusggsimid/dsh-antigravity-acp`. The desktop profile is named `desktop`, not `web`. Reload DeepSeek Harness after installing. A page refresh is not enough for host-side changes.
+
+While changing the code locally, point the dependency at the cloned `antigravity-acp/` directory:
 
 ```json
 {

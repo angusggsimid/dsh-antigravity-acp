@@ -1,0 +1,49 @@
+{
+  "name": "@local/dsh-antigravity-acp",
+  "version": "5.5.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Gemini (AI Pro) through the official Antigravity ACP server over SSH. Tools run locally. Shows the subscription quota in Settings and beside the composer.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/angusggsimid/dsh-antigravity-acp.git"
+  },
+  "homepage": "https://github.com/angusggsimid/dsh-antigravity-acp#readme",
+  "bugs": {
+    "url": "https://github.com/angusggsimid/dsh-antigravity-acp/issues"
+  },
+  "exports": {
+    ".": "./antigravity-acp/index.js",
+    "./client": "./antigravity-acp/client.js",
+    "./locale/*.json": "./antigravity-acp/locale/*.json",
+    "./icon": "./antigravity-acp/icon.svg"
+  },
+  "files": [
+    "antigravity-acp/index.js",
+    "antigravity-acp/quota.js",
+    "antigravity-acp/deployment.js",
+    "antigravity-acp/client.js",
+    "antigravity-acp/cordis.patch.yml",
+    "antigravity-acp/locale",
+    "antigravity-acp/icon.svg",
+    "antigravity-acp/README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./antigravity-acp/cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-model-selection"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "npm test --prefix antigravity-acp",
+    "test:real": "npm run test:real --prefix antigravity-acp"
+  }
+}

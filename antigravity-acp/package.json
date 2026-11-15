@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-antigravity-acp",
-  "version": "5.5.0",
+  "version": "5.5.1",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -22,6 +22,7 @@
   "files": [
     "index.js",
     "quota.js",
+    "deployment.js",
     "client.js",
     "cordis.patch.yml",
     "locale/*.json",

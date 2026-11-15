@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.5.1
+
+- 仓库根目录的 `package.json` 指向 `antigravity-acp/`，因此 `github:angusggsimid/dsh-antigravity-acp` 可以直接安装。原来的 `link:` 目录不变，包仍然不发布到 npm。
+
 ## 5.5.0
 
 - 订阅设置页、输入框额度徽章和 `gemini_quota` 工具并入本插件。额度仍通过原来的 HTTP 桥读取，数据格式和刷新节奏不变。
