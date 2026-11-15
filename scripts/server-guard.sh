@@ -73,7 +73,29 @@ SystemKeepFree=1G
 EOF
 systemctl restart systemd-journald
 
-# ------------------------------------------------------------ 3. the guard
+# ------------------------------------------------ 3. kernel watchdog
+# The guard above runs in userspace. If userspace itself stops — which is what a
+# memory freeze looks like — nothing scheduled can act. softdog is a kernel timer
+# that systemd pings; when the pings stop, the machine resets itself, and it works
+# even when no process can run.
+if modprobe softdog 2>/dev/null && [ -c /dev/watchdog ]; then
+  echo softdog > /etc/modules-load.d/antigravity-watchdog.conf
+  install -d /etc/systemd/system.conf.d
+  cat > /etc/systemd/system.conf.d/50-antigravity-watchdog.conf <<EOF
+[Manager]
+RuntimeWatchdogSec=${WATCHDOG_SEC:-120s}
+RebootWatchdogSec=5min
+ShutdownWatchdogSec=5min
+EOF
+  # The manager only re-reads these on reexec; the setting is live right after.
+  systemctl daemon-reexec
+  WATCHDOG_LINE="watchdog: softdog, RuntimeWatchdogSec=${WATCHDOG_SEC:-120s}"
+else
+  WATCHDOG_LINE="watchdog: no softdog module, userspace hangs cannot self-reset"
+  say "$WATCHDOG_LINE"
+fi
+
+# ------------------------------------------------------------ 4. the guard
 cat > "$GUARD_BIN" <<EOF
 #!/usr/bin/env bash
 # Written by server-guard. Acts on the host by itself; nothing here waits for a
@@ -235,4 +257,5 @@ say 'installed:'
 awk '/^MemTotal:|^SwapTotal:/{printf "[server-guard]   %s %d MB\n", $1, $2/1024}' /proc/meminfo
 say "  sshd banner: $(timeout "$SSHD_PROBE_TIMEOUT" bash -c 'exec 3<>/dev/tcp/127.0.0.1/22 && IFS= read -r -t 3 line <&3 && [[ $line == SSH-* ]]' 2>/dev/null && echo ok || echo dead)"
 say "  timer: $(systemctl is-active antigravity-guard.timer 2>/dev/null || echo unknown) (every minute)"
+say "  ${WATCHDOG_LINE:-watchdog: not configured}"
 say "  last line: $(tail -1 "$GUARD_LOG" 2>/dev/null || echo '(none)')"
