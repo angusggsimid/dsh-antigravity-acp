@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.5.2
+
+- 工具调用被退回 `unknown tool` 时，不再把那份失效的工具名单带到后面每一轮：下一轮开始前确认反向隧道可通，然后丢掉旧 ACP 会话、重新握手，并把当前对话重放进去。每个会话最多重建两次，可用 `DSH_AGY_SESSION_REPAIRS` 调整。
+- 恢复旧会话时，如果它记录的是一份和当前不同的工具名单，直接新建会话，不再沿用。
+- 重建或重连会话时清空旧会话的工具调用去重缓存，避免新会话拿到上一轮的结果。
+
 ## 5.5.1
 
 - 仓库根目录的 `package.json` 指向 `antigravity-acp/`，因此 `github:angusggsimid/dsh-antigravity-acp` 可以直接安装。原来的 `link:` 目录不变，包仍然不发布到 npm。

@@ -107,6 +107,67 @@ async function runTurn(sessionId, text) {
     `text=${JSON.stringify(retry.text.slice(0, 50))}`)
 }
 
+// ------------------- 4. an unknown-tool reply rebuilds the session, once
+const TOOL_A = { name: 'alpha_tool', description: 'A', parameters: { type: 'object', properties: {} } }
+
+async function turnWith(sessionId, messages, tools) {
+  const out = { text: '', toolCalls: [], finish: undefined, failure: undefined }
+  const stream = adapter.stream({
+    provider: 'antigravity', model: 'gemini-3.8-flash',
+    messages, tools, sessionId, reasoningEffort: 'medium',
+  })
+  for await (const chunk of stream) {
+    if (chunk.type === 'text-delta') out.text += chunk.text
+    else if (chunk.type === 'block-end' && chunk.block?.type === 'tool-call') out.toolCalls.push(chunk.block)
+    else if (chunk.type === 'finish') out.finish = chunk.reason
+  }
+  return out
+}
+
+{
+  const base = [userMessage('KW_TOOL:alpha_tool please')]
+  const first = await turnWith('rec-repair', base, [TOOL_A])
+  const call = first.toolCalls[0]
+  record('a harness tool is reachable through the bridge', call?.name === 'alpha_tool', `name=${call?.name}`)
+
+  const newBefore = (logText().match(/session\/new ->/g) ?? []).length
+  const withBadResult = [
+    ...base,
+    { role: 'assistant', content: [] },
+    { role: 'tool', toolCallId: call?.id, isError: true, content: [{ type: 'text', text: 'Unknown tool: alpha_tool' }] },
+  ]
+  const second = await turnWith('rec-repair', withBadResult, [TOOL_A])
+  const newAfterResult = (logText().match(/session\/new ->/g) ?? []).length
+  record('an unknown-tool result does not rebuild mid-turn',
+    newAfterResult === newBefore && second.toolCalls.length === 0,
+    `session/new ${newBefore} -> ${newAfterResult}, text=${JSON.stringify(second.text.slice(0, 40))}`)
+
+  const third = await turnWith('rec-repair', [
+    ...withBadResult,
+    { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    userMessage('after the bad tool result, carry on'),
+  ], [TOOL_A])
+  const newAfterRepair = (logText().match(/session\/new ->/g) ?? []).length
+  record('the next turn re-handshakes the session',
+    newAfterRepair === newAfterResult + 1,
+    `session/new ${newAfterResult} -> ${newAfterRepair}`)
+  record('the rebuilt session replays the transcript and reaches the bridge again',
+    third.toolCalls[0]?.name === 'alpha_tool',
+    `name=${third.toolCalls[0]?.name} text=${JSON.stringify(third.text.slice(0, 40))}`)
+
+  const repairedCall = third.toolCalls[0]
+  const fourth = await turnWith('rec-repair', [
+    ...withBadResult,
+    { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    userMessage('after the bad tool result, carry on'),
+    { role: 'assistant', content: [] },
+    { role: 'tool', toolCallId: repairedCall?.id, content: [{ type: 'text', text: 'alpha:repaired=true' }] },
+  ], [TOOL_A])
+  record('the repaired session completes a tool call end to end',
+    /alpha:repaired=true/.test(fourth.text),
+    `text=${JSON.stringify(fourth.text.slice(0, 60))}`)
+}
+
 function privateFailure(result) {
   return result.failure?.message ?? `text=${result.text.slice(0, 60)}`
 }

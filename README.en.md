@@ -23,6 +23,7 @@ It does not sign you in to Google, and it does not ship a host, a key, or a port
 - Registers Gemini 3.8 Flash. One plugin can register several routes. Each route is one model, one remote machine, and one sign-in.
 - Lets more than one DeepSeek Harness session use the model at once. Each ACP session has its own worker.
 - Resumes the previous ACP session after idle time or a dropped connection, instead of replaying the whole transcript.
+- Rebuilds that session on the next turn when a tool call comes back `unknown tool`: the tunnel is verified first, then the current conversation is replayed into a new session. At most two rebuilds per conversation, so a genuinely broken route still fails loudly instead of reconnecting forever.
 - Adds an Antigravity subscription section in Settings, and a quota badge beside the composer while Gemini is selected.
 
 ## Extensibility

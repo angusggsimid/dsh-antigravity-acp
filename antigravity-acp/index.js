@@ -101,6 +101,16 @@ const MAX_HARD_SESSIONS = Number(process.env.DSH_AGY_MAX_SESSIONS_HARD ?? 4)
  * instead of re-feeding a 120k-character transcript.
  */
 const RESUME = process.env.DSH_AGY_RESUME !== '0'
+/**
+ * A tool call that comes back unknown means the agent is holding a tool list this
+ * harness never offered: agy freezes the MCP declaration set when the session is
+ * created and never re-reads it, so a session built during a bad handshake stays
+ * tool-less for its whole life. Rebuilding it costs one replay, which beats every
+ * later turn failing the same way — so allow a small, fixed number per conversation.
+ */
+const SESSION_REPAIRS = Number(process.env.DSH_AGY_SESSION_REPAIRS ?? 2)
+/** How a frozen remote tool list surfaces: the name was never dispatvable there. */
+const UNKNOWN_TOOL_TEXT = /unknown tool|not a known tool|no such tool|unrecognized tool|tool [^.\n]{0,40}not found/i
 const CWD = process.env.DSH_AGY_CWD || ''
 const SESSION_STORE = process.env.DSH_AGY_SESSION_STORE || join(homedir(), '.dsh', 'cache', 'antigravity-acp', 'sessions.json')
 /**
@@ -250,6 +260,14 @@ function safeEqual(left, right) {
   const a = Buffer.from(left)
   const b = Buffer.from(right)
   return a.length === b.length && timingSafeEqual(a, b)
+}
+
+/** True when a tool result says the harness does not know the name it was handed. */
+function unknownToolReply(content) {
+  const blocks = Array.isArray(content) ? content : []
+  return blocks.some((block) => (
+    block?.type === 'text' && typeof block.text === 'string' && UNKNOWN_TOOL_TEXT.test(block.text)
+  ))
 }
 
 /**
@@ -545,6 +563,12 @@ class Conversation {
     this.reasoningChars = 0
     this.index = 0
     this.failed = undefined
+    /** A tool result proved this session's remote tool list is stale; rebuild next turn. */
+    this.needsRepair = false
+    /** Why the rebuild was asked for, kept for the log line. */
+    this.repairReason = undefined
+    /** Rebuilds spent on this conversation, so a broken route cannot loop forever. */
+    this.repairAttempts = 0
     /** agy built-in tool calls seen during the current step, for diagnostics. */
     this.builtinCalls = []
     /** Built-in tools this bridge refused during the current step. */
@@ -771,6 +795,14 @@ class Conversation {
       if (!call) continue
       clearTimeout(call.timer)
       const payload = { content: result.content, isError: result.isError }
+      // A reply that says the name is unknown proves the session's frozen tool
+      // list never carried it. Flag it here — the turn already has results in
+      // flight — and let the next real turn rebuild the session once.
+      if (payload.isError === true && !this.needsRepair && unknownToolReply(payload.content)) {
+        this.needsRepair = true
+        this.repairReason = `unknown tool ${call.name}`
+        diag('session.repair-queued', { key: this.key, tool: call.name })
+      }
       if (call.respond && !call.relayed) call.respond(payload)
       else {
         this.ready.set(result.id, payload)
@@ -1662,7 +1694,18 @@ class Runtime {
     }
 
     const saved = RESUME && !forceNew ? this.store.get(this.persistedKey(conversation.key)) : undefined
-    if (saved?.sessionId) {
+    // A session recorded against a different tool list cannot be repaired in place:
+    // agy reads the MCP declaration set once, when the session is created, and never
+    // again. Resuming it replays the same transcript a new session needs, so start
+    // clean instead of inheriting a set that no longer matches this harness.
+    const staleTools = saved?.sessionId !== undefined && (saved.toolKey ?? '') !== toolKey
+    if (staleTools) {
+      log(this.ctx, `session ${saved.sessionId} was bound to a different tool set; re-handshaking`)
+      diag('session.repair', { key: conversation.key, reason: 'tool-set-changed' })
+      conversation.repairAttempts += 1
+      try { await conversation.link.request('session/close', { sessionId: saved.sessionId }, 5_000) } catch { /* already gone */ }
+      this.store.delete(this.persistedKey(conversation.key))
+    } else if (saved?.sessionId) {
       try {
         await conversation.link.request('session/resume', { sessionId: saved.sessionId, ...params }, 45_000)
         const stored = Array.isArray(saved.baseline) ? saved.baseline : []
@@ -1677,6 +1720,11 @@ class Runtime {
           conversation.toolKey = toolKey
           conversation.model = undefined
           conversation.effort = undefined
+          conversation.needsRepair = false
+          conversation.repairReason = undefined
+          // A different ACP session starts its own tool-call ids, so the dedupe
+          // cache from the previous one must not answer for it.
+          conversation.recent.clear()
           log(this.ctx, `resumed session ${saved.sessionId} for ${conversation.key} (no replay)`)
           diag('session.resume', { key: conversation.key })
           return
@@ -1697,6 +1745,11 @@ class Runtime {
     conversation.linkEpoch = conversation.link.epoch
     conversation.model = undefined
     conversation.effort = undefined
+    conversation.needsRepair = false
+    conversation.repairReason = undefined
+    // Same reason as the resume path: tool-call ids belong to the session that
+    // issued them, and a rebuilt session reuses them from the start.
+    conversation.recent.clear()
     this.store.set(this.persistedKey(conversation.key), { sessionId: created.sessionId, toolKey, baseline: [] })
     log(this.ctx, `session ${created.sessionId} for ${conversation.key}`)
     diag('session.new', { key: conversation.key })
@@ -1806,6 +1859,28 @@ class Runtime {
         conversation.baseline = []
         forceNew = true
         this.store.delete(this.persistedKey(conversation.key))
+      }
+      // A tool result said the name was unknown, so this session's frozen list is
+      // wrong and every later turn would inherit it. Rebuild once, with the tunnel
+      // already verified above, and let the transcript replay teach the new
+      // session what the old one knew. The budget keeps a genuinely broken route
+      // from rebuilding on every turn.
+      if (conversation.needsRepair) {
+        const reason = conversation.repairReason ?? 'unknown tool'
+        conversation.needsRepair = false
+        conversation.repairReason = undefined
+        if (live && conversation.repairAttempts < SESSION_REPAIRS) {
+          conversation.repairAttempts += 1
+          conversation.sessionId = undefined
+          conversation.toolKey = ''
+          conversation.baseline = []
+          forceNew = true
+          this.store.delete(this.persistedKey(conversation.key))
+          log(this.ctx, `re-handshaking ${conversation.key} after ${reason} (repair ${conversation.repairAttempts}/${SESSION_REPAIRS})`)
+          diag('session.repair', { key: conversation.key, reason })
+        } else if (live) {
+          log(this.ctx, `not re-handshaking ${conversation.key}: ${SESSION_REPAIRS} repairs already spent`)
+        }
       }
       await this.ensureSession(conversation, tools, { messages, forceNew, system: options.system ?? '' })
       await this.configure(conversation, options.reasoningEffort)
