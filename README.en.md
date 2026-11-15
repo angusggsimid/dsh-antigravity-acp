@@ -8,6 +8,10 @@ The default model is Gemini 3.8 Flash. Set `modelId` on a route to any model id 
 
 While this model is selected, Settings and the composer show the 5-hour and weekly windows of the Antigravity subscription quota.
 
+![This machine, a tunnel, the official client](docs/images/hero.png)
+
+![One plugin, three routes](docs/images/routes.png)
+
 ![How a request moves](docs/images/flow.svg)
 
 ![One plugin, several routes](docs/images/routes.svg)

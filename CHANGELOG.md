@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.5.12
+
+- README 加了两张 Grok Imagine 配图。商店用的位图图标在 `docs/images/icon-180.png`。
+
 ## 5.5.11
 
 - 路线可以写 `modelId`。默认仍是 `gemini-3.8-flash`；Antigravity CLI 接受的其他模型 id 用同一条隧道。之前这个 id 写死，只有显示名能改。

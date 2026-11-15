@@ -8,6 +8,10 @@ DeepSeek Harness 插件。用官方 Antigravity CLI（`agy acp`）把 Gemini 接
 
 选中这个模型时，设置页和输入框旁会显示订阅额度里的 5 小时窗口和每周窗口。
 
+![本机连到远端的官方客户端](docs/images/hero.png)
+
+![一条插件，三条路线](docs/images/routes.png)
+
 ![请求怎么走](docs/images/flow.svg)
 
 ![一条插件，多条路线](docs/images/routes.svg)
