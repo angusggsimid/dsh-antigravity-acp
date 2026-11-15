@@ -44,7 +44,7 @@ DeepSeek Harness 插件。用官方 Antigravity CLI（`agy acp`）把 Gemini 3.8
 - 一台能运行官方 `agy` 的机器，以及从本机到它的 SSH。
 - 远端的 `agy` 已经登录 Google AI Pro / Antigravity。
 - 只有在要显示额度时，才需要那条本地 HTTP 桥，以及 DSH 凭据库里对应的钥匙。
-- 建议在那台机器上跑一次 [`scripts/server-guard.sh`](scripts/server-guard.sh)：加 swap、限制日志、每 5 分钟记录资源并回收无主 worker。理由和做法见 [docs/ops/server.md](docs/ops/server.md)。没装也能用，但那台机器的内存见底时整机会连同 SSH 一起卡死。
+- 建议在那台机器上跑一次 [`scripts/server-guard.sh`](scripts/server-guard.sh)：加 swap、限制日志，并每分钟自动处理一次（回收无主 worker、内存不足时结束最大的 worker、sshd 不应答时重启它）。理由和做法见 [docs/ops/server.md](docs/ops/server.md)。没装也能用，但那台机器内存见底时会连同 SSH 一起卡死。
 
 ## 安装
 

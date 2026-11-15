@@ -4,6 +4,8 @@
 "插件坏了" 的样子出现，所以装完插件之后，建议在那台机器上再跑一次
 [`scripts/server-guard.sh`](../../scripts/server-guard.sh)。
 
+这份脚本的目标是**不需要人守着**：它每分钟自己看一遍，该收的收、该救的救、救不回来才重启机器。
+
 ## 为什么需要
 
 一次真实事故，同一台机器上同时出现三件事：
@@ -12,28 +14,32 @@
   `cannot listen to port`。
 - 那台机器只有 1.6G 内存，**没有 swap**。
 - 从出现内存压力到彻底不再写日志，中间只有六分钟；之后它还能接受 TCP 连接，但不再回 SSH
-  banner，`agy` 的工具通道和额度桥一起失联，只能重启。
+  banner，`agy` 的工具通道和额度桥一起失联，只能靠人重启。
 
 插件这一侧已经改了：远端端口被占时会换端口、所有端口都失败时会说清是主机的问题、隧道尝试
-有总量预算（默认每 10 分钟 20 次），正常退出也会先把会话关掉再拆链路。但**机器本身没有余量**
-这件事，插件管不了。
+有总量预算（默认每 10 分钟 20 次），正常退出也会先把会话关掉再拆链路。但**机器本身会不会
+把自己拖死**，插件管不了——那是这份脚本的事。
 
 ## 脚本装了什么
 
-一个幂等的安装脚本，重复运行只会补齐缺失项，不会重建已有的 swap：
+幂等安装，重复运行只补齐缺失项，不会重建已有的 swap。
 
-1. **swap 和低 swappiness**：默认 2G，写进 `/etc/fstab`；`vm.swappiness=10`，只在真有压力时
-   才回收。没有 swap 的 1.6G 机器，一次突发就是整机卡死；有 swap 最差是变慢。
-2. **日志上限**：journald 限制 200M，并给看护日志配了轮转。
-3. **5 分钟一次的看护**（`antigravity-guard.timer`）：
-   - 记一行内存、swap、iowait、磁盘、worker 数、无主 worker 数；
-   - 回收父进程已经不在的 `agy acp` worker（`sshd` 正常会在会话结束时收掉它，父进程变成 1
-     说明没被收掉，这些 worker 会一直占内存到下次重启）；
-   - 内存可用低于 200M、磁盘占用超过 85%、swap 使用超过 80% 时把该行标成 `status=warn`。
+1. **swap 和低 swappiness**：默认 2G，写进 `/etc/fstab`；`vm.swappiness=10`。没有 swap 的
+   1.6G 机器，一次突发就是整机卡死；有 swap 最差是变慢。
+2. **日志上限**：journald 限制 200M，并给看护日志配轮转。
+3. **每分钟一次的看护**（`antigravity-guard.timer`），每次都做这几件事：
+
+| 情况 | 自动动作 |
+|---|---|
+| `agy acp` 的父进程已经不在 | 结束它。`sshd` 正常会在会话结束时收掉，父进程变成 1 说明没收掉，这类 worker 会一直占内存到下次重启 |
+| 可用内存 < 150M | 按 RSS 从大到小结束 worker，直到回到 150M 以上（最多 3 个）。被结束的那条 ACP 会话会在插件下一轮重建 |
+| 磁盘占用 ≥ 85% | 收缩 journald 到 100M、删掉 3 天前的 `.gz` 日志、清空轮转中的看护日志 |
+| 端口 22 连续两次拿不到 SSH banner | 重启 `sshd`，并验证它恢复应答。30 分钟内最多 3 次，防止重启循环 |
+| 可用内存 < 80M **且** sshd 已经不应答 | 重启机器。这是最后手段，只在"已经冻住"这个特征同时成立时触发，且每次开机最多一次 |
 
 ## 怎么装
 
-把仓库里的脚本传到那台机器上执行即可，两台（或多台）机器各跑一次：
+把仓库里的脚本传到那台机器上执行，两台（或多台）各跑一次：
 
 ```sh
 scp scripts/server-guard.sh user@host:/tmp/
@@ -46,8 +52,8 @@ ssh user@host 'sudo bash /tmp/server-guard.sh'
 ssh user@host 'sudo -n bash -s' < scripts/server-guard.sh
 ```
 
-非 root 的机器上用 `sudo` 执行；脚本自己会检查权限。装完会打印内存、swap、定时器状态和
-第一行看护记录。
+非 root 机器用 `sudo` 执行，脚本自己会检查权限。装完会打印内存、swap、sshd banner 探测结果、
+定时器状态和第一行看护记录。
 
 ## 怎么读
 
@@ -56,31 +62,39 @@ tail -5 /var/log/antigravity-guard.log
 ```
 
 ```
-2026-11-15T16:54:59+08:00 status=ok load=0.00 mem_avail=1232M swap=0/2047M iowait=0% disk=16% agy=0 orphan=0 reaped=0
+17:04:37 status=ok  load=0.00 mem_avail=1155M swap=0/2047M iowait=0% disk=16% agy=1 orphan=0 reaped=0 actions=0
+17:05:08 status=ok  load=0.00 mem_avail=1166M swap=0/2047M iowait=0% disk=16% agy=2 orphan=1 reaped=1 actions=1
+17:05:08 action=reaped-orphan pid=3441
 ```
 
-- `agy` 是当前 worker 数，`orphan` 是父进程已消失的数量，`reaped` 是这一轮回收掉的数量。
-- `status=warn` 后面会跟着原因（`mem<200M`、`disk>=85%`、`swap>=80%`）。
-- 出现 `status=warn` 时先看 `reaped` 是否在涨：在涨说明确实有 worker 在堆积。
+- `actions` 是这一轮动手的次数，`action=` 开头的行是具体做了什么的记录。
+- `status=warn` 会带上原因：`mem<200M`、`disk>=85%`、`swap>=80%`、`sshd-no-banner`。
+- `orphan` / `reaped` 持续增长，说明有客户端在反复断开又没干净收尾。
 
 ## 阈值
 
-脚本用环境变量覆盖默认值，不用改代码：
+用环境变量覆盖，不用改代码：
 
 | 变量 | 默认 | 含义 |
 |---|---|---|
 | `SWAP_SIZE` | `2G` | 新建 swap 的大小 |
-| `MEM_WARN_MB` | `200` | 可用内存低于它就算 warn |
-| `DISK_WARN_PCT` | `85` | 磁盘占用超过它就算 warn |
+| `MEM_WARN_MB` | `200` | 可用内存低于它记 warn |
+| `MEM_FREE_MB` | `150` | 低于它开始结束 worker |
+| `MEM_REBOOT_MB` | `80` | 低于它且 sshd 无应答时重启机器 |
+| `DISK_WARN_PCT` | `85` | 磁盘占用超过它记 warn 并清日志 |
+| `SSHD_PROBE_TIMEOUT` | `4` | banner 探测的超时秒数 |
 
-重跑脚本会按新阈值重写看护脚本，swap 不会被重建。
+重跑脚本会按新阈值重写看护脚本；swap 不会被重建。
 
-## 还要配的地方
+不需要自动重启机器的话，把 `MEM_REBOOT_MB` 设成 `0` 就能关掉这一条（其余自动化照旧）。
 
-- **云监控的内存指标**。这次事故里内存那一栏是"暂无数据"，最该看的指标恰好是空的。装好探针
-  后至少配三类告警：磁盘占用、可用内存、实例不可达。指标缺失本身也值得告警一次。
-- **SSH 的 keepalive**：`ClientAliveInterval 30`、`ClientAliveCountMax 3`，让掉线的会话尽快
-  释放。这不是这次的原因，但能让死会话不长期占着 `sshd` 的子进程名额。
+## 和云监控的关系
+
+自动化在这台机器上，不需要人值守；云监控只用来兜底**整机彻底失联**这一种情况：
+
+- 主机监控需要装 `argusagent` 才能看到内存/swap，没装时那一栏是空的。
+- 建议只保留一类告警：**实例不可达 / 心跳丢失**。其余阈值已经由这份脚本自己处理了，
+  再配报警只会制造需要人确认的噪音。
 
 ## 卸载
 
