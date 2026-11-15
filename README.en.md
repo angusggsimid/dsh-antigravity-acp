@@ -24,6 +24,7 @@ It does not sign you in to Google, and it does not ship a host, a key, or a port
 - Lets more than one DeepSeek Harness session use the model at once. Each ACP session has its own worker.
 - Resumes the previous ACP session after idle time or a dropped connection, instead of replaying the whole transcript.
 - Rebuilds that session on the next turn when a tool call comes back `unknown tool`: the tunnel is verified first, then the current conversation is replayed into a new session. At most two rebuilds per conversation, so a genuinely broken route still fails loudly instead of reconnecting forever.
+- Moves to another remote port when a forward left behind by an earlier DSH process is still holding the configured one, and rebuilds the affected sessions. Pin one with `remotePort` on the route when it must not move.
 - Adds an Antigravity subscription section in Settings, and a quota badge beside the composer while Gemini is selected.
 
 ## Extensibility

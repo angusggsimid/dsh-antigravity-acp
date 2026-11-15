@@ -109,6 +109,25 @@ const RESUME = process.env.DSH_AGY_RESUME !== '0'
  * later turn failing the same way — so allow a small, fixed number per conversation.
  */
 const SESSION_REPAIRS = Number(process.env.DSH_AGY_SESSION_REPAIRS ?? 2)
+/**
+ * A remote port is a shared name on someone else's machine. When an earlier DSH
+ * process died without tearing its forward down, sshd can still be holding that
+ * port, and a new `-R` then either fails to bind or binds next to the dead
+ * listener — which answers every probe with silence. The port is invisible to
+ * the user, so move to another one instead of failing the turn.
+ */
+const TUNNEL_PORTS = Number(process.env.DSH_AGY_TUNNEL_PORTS ?? 5)
+/** How long a fresh forward gets before it counts as unreachable. */
+const TUNNEL_VERIFY_MS = 15_000
+/** A retry on another port does not deserve the full window. */
+const TUNNEL_VERIFY_RETRY_MS = 6_000
+/** sshd's own words when the requested remote port is already taken. */
+const REMOTE_PORT_TAKEN = /remote port forwarding failed|Address already in use|cannot listen to port/i
+/**
+ * ssh could not get a session at all. That is the host or the network refusing
+ * us, not a port problem, so moving ports would only make the failure slower.
+ */
+const SSH_UNREACHABLE = /Connection timed out|banner exchange|Connection refused|No route to host|Could not resolve hostname|Permission denied|Host key verification failed|Connection reset/i
 /** How a frozen remote tool list surfaces: the name was never dispatvable there. */
 const UNKNOWN_TOOL_TEXT = /unknown tool|not a known tool|no such tool|unrecognized tool|tool [^.\n]{0,40}not found/i
 const CWD = process.env.DSH_AGY_CWD || ''
@@ -1240,8 +1259,11 @@ class Runtime {
     this.locks = new Map()
     this.server = undefined
     this.port = undefined
+    /** The port the remote host dials; see TUNNEL_PORTS for why it can move. */
+    this.remotePort = route.remotePort || route.mcpPort
     this.tunnel = undefined
     this.tunnelStderr = ''
+    this.probeStderr = ''
     this.tunnelAttempts = 0
     this.tunnelRestart = undefined
     /** True only while the remote host can actually reach this route's MCP port. */
@@ -1382,9 +1404,22 @@ class Runtime {
     if (NO_TUNNEL || ACP_COMMAND) return
     requireSsh(this.route)
     const alive = this.tunnel !== undefined && this.tunnel.exitCode == null
-    if (alive && !verify) return
-    if (!alive) await this.#tunnelSpawn()
-    if (verify || !this.tunnelVerified) await this.#verifyTunnel()
+    if (!alive) {
+      await this.#connectVerified()
+      return
+    }
+    if (verify || !this.tunnelVerified) {
+      try {
+        await this.#verifyTunnel()
+      } catch (error) {
+        if (this.stopping || error?.transport === true) throw error
+        // The ssh process is alive, but the remote side never answered: something
+        // else is holding the name, and only a different port escapes it.
+        this.#killTunnel()
+        this.#rotateRemotePort()
+        await this.#connectVerified()
+      }
+    }
   }
 
   async #ensureTunnel() {
@@ -1402,7 +1437,7 @@ class Runtime {
     this.tunnelVerified = false
     this.tunnelStderr = ''
     const child = spawn('ssh', [...sshOptions(this.route), '-o', 'ExitOnForwardFailure=yes', '-N',
-      '-R', `127.0.0.1:${this.port}:127.0.0.1:${this.port}`, this.route.sshHost], { stdio: ['ignore', 'ignore', 'pipe'] })
+      '-R', `127.0.0.1:${this.remotePort}:127.0.0.1:${this.port}`, this.route.sshHost], { stdio: ['ignore', 'ignore', 'pipe'] })
     this.tunnel = child
     child.stderr.on('data', (chunk) => { this.tunnelStderr = (this.tunnelStderr + chunk.toString()).slice(-2000) })
     child.on('error', (error) => log(this.ctx, `${this.route.provider} reverse tunnel spawn error: ${error instanceof Error ? error.message : error}`))
@@ -1413,10 +1448,55 @@ class Runtime {
     }
   }
 
-  async #verifyTunnel() {
+  /**
+   * Bring the forward up and prove the remote can reach this bridge, moving to
+   * another remote port when the current one is poisoned. Only a port problem is
+   * retried: an auth or network failure is reported as-is instead of burning the
+   * whole budget on ports that were never the reason.
+   */
+  async #connectVerified() {
+    let lastFailure = ''
+    for (let attempt = 0; attempt <= TUNNEL_PORTS; attempt += 1) {
+      if (attempt > 0) this.#rotateRemotePort()
+      try {
+        await this.#tunnelSpawn()
+      } catch (error) {
+        lastFailure = error instanceof Error ? error.message : String(error)
+        // sshd refused the bind: that port is taken, and another one may be free.
+        if (REMOTE_PORT_TAKEN.test(this.tunnelStderr)) continue
+        throw error
+      }
+      try {
+        await this.#verifyTunnel({ budgetMs: attempt === 0 ? TUNNEL_VERIFY_MS : TUNNEL_VERIFY_RETRY_MS })
+        return
+      } catch (error) {
+        lastFailure = error instanceof Error ? error.message : String(error)
+        if (this.stopping || error?.transport === true) throw error
+      }
+    }
+    throw new Error(lastFailure || `${this.route.providerName} reverse tunnel could not be verified`)
+  }
+
+  /**
+   * Move to another remote port. Sessions already told the old one, so they are
+   * flagged for a rebuild on their next turn rather than silently losing tools.
+   */
+  #rotateRemotePort() {
+    const base = this.route.mcpPort || this.port || 20000
+    this.remotePort = 20000 + ((base + randomBytes(2).readUInt16BE(0)) % 40000)
+    this.tunnelVerified = false
+    log(this.ctx, `${this.route.provider} remote port is taken or stale; trying ${this.remotePort}`)
+    for (const conversation of this.conversations.values()) {
+      if (conversation.sessionId === undefined) continue
+      conversation.needsRepair = true
+      conversation.repairReason = `tunnel port ${this.remotePort}`
+    }
+  }
+
+  async #verifyTunnel({ budgetMs = TUNNEL_VERIFY_MS } = {}) {
     // A fresh host often needs more than a second before the remote port listens.
     // Probing only four times at 400ms reported a live tunnel that was not ready.
-    const deadline = Date.now() + 15_000
+    const deadline = Date.now() + budgetMs
     while (Date.now() < deadline) {
       if (this.tunnel?.exitCode != null) {
         throw new Error(`reverse tunnel failed: ${this.tunnelStderr.slice(-400)}`)
@@ -1424,7 +1504,7 @@ class Runtime {
       const probed = await this.#probeTunnel()
       if (probed === true) {
         this.tunnelVerified = true
-        log(this.ctx, `${this.route.provider} tunnel ready on ${this.port}`)
+        log(this.ctx, `${this.route.provider} tunnel ready on ${this.remotePort}`)
         return
       }
       if (probed === 'unverifiable') {
@@ -1434,29 +1514,57 @@ class Runtime {
         log(this.ctx, `${this.route.provider} tunnel not verified: the remote host has no python3, curl, or nc`)
         return
       }
+      if (probed === 'unreachable') {
+        // ssh refused to open a session, so this probe learned nothing about the
+        // port. The forward itself may still be fine, and failing the turn here
+        // would blame the plugin for the host refusing connections.
+        if (this.tunnel?.exitCode == null) {
+          this.tunnelVerified = true
+          log(this.ctx, `${this.route.provider} could not probe the forward (host refused an SSH session); keeping the live tunnel`)
+          return
+        }
+        const error = new Error(`${this.route.providerName}: cannot open an SSH connection to the host (${this.probeStderr.slice(-200) || 'no detail'})`)
+        error.transport = true
+        throw error
+      }
       await new Promise((resolve) => setTimeout(resolve, 500))
     }
-    try { this.tunnel?.kill('SIGTERM') } catch { /* already gone */ }
+    this.#killTunnel()
+    throw new Error(`${this.route.providerName} reverse tunnel is up but the remote host cannot reach the local tool bridge on port ${this.remotePort}`)
+  }
+
+  /** Drop the forward now; a restart the exit handler schedules later is a no-op. */
+  #killTunnel() {
+    const child = this.tunnel
     this.tunnel = undefined
     this.tunnelVerified = false
-    throw new Error(`${this.route.providerName} reverse tunnel is up but the remote host cannot reach the local tool bridge`)
+    try { child?.kill('SIGTERM') } catch { /* already gone */ }
   }
 
   /** Ask the remote host to open this route's forwarded health URL. */
   #probeTunnel() {
     return new Promise((resolve) => {
-      const url = `http://127.0.0.1:${this.port}/health`
+      const url = `http://127.0.0.1:${this.remotePort}/health`
       const script = [
         `if command -v python3 >/dev/null 2>&1; then python3 -c 'import urllib.request;urllib.request.urlopen("${url}",timeout=4).read()';`,
         `elif command -v curl >/dev/null 2>&1; then curl -fsS --max-time 4 -o /dev/null "${url}";`,
-        `elif command -v nc >/dev/null 2>&1; then nc -z 127.0.0.1 ${this.port};`,
+        `elif command -v nc >/dev/null 2>&1; then nc -z 127.0.0.1 ${this.remotePort};`,
         'else exit 2; fi',
       ].join(' ')
-      const child = spawn('ssh', [...sshOptions(this.route), '-T', this.route.sshHost, '--', script], { stdio: ['ignore', 'ignore', 'pipe'] })
+      // A refused session must surface quickly: the caller then keeps the live
+      // tunnel instead of spending the whole verify budget on dead connects.
+      const child = spawn('ssh', [...sshOptions(this.route), '-o', 'ConnectTimeout=5', '-T', this.route.sshHost, '--', script], { stdio: ['ignore', 'ignore', 'pipe'] })
+      let stderr = ''
+      child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-600) })
+      this.probeStderr = stderr
       const timer = setTimeout(() => { try { child.kill('SIGTERM') } catch { /* gone */ } resolve(false) }, 12_000)
       child.on('error', () => { clearTimeout(timer); resolve(false) })
       child.on('exit', (code) => {
         clearTimeout(timer)
+        this.probeStderr = stderr
+        // 255 is ssh's own failure: the probe never ran, so nothing was learned
+        // about the port. A transport failure must not look like a dead listener.
+        if (code === 255 && SSH_UNREACHABLE.test(stderr)) { resolve('unreachable'); return }
         resolve(code === 0 ? true : code === 2 ? 'unverifiable' : false)
       })
     })
@@ -1688,7 +1796,8 @@ class Runtime {
       mcpServers: [{
         type: 'http',
         name: 'dsh',
-        url: `http://127.0.0.1:${this.port}/mcp/${conversation.tenant}`,
+        // agy runs on the remote host, so it dials the remote side of the forward.
+        url: `http://127.0.0.1:${this.remotePort}/mcp/${conversation.tenant}`,
         headers: [{ name: 'Authorization', value: `Bearer ${conversation.secret}` }],
       }],
     }

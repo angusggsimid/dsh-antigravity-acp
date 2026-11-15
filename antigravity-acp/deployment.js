@@ -39,6 +39,11 @@ function routeFrom(raw, index) {
     sshHost: String(source.sshHost || ''),
     sshKey: String(source.sshKey || ''),
     mcpPort: Number((index === 0 ? process.env.DSH_AGY_MCP_PORT : '') || source.mcpPort || 0) || 0,
+    /**
+     * The port the remote host dials. Left at 0 the plugin moves it itself when
+     * the configured one is held by a forward left behind on that host.
+     */
+    remotePort: Number(source.remotePort || 0) || 0,
     home: String(source.home || '$HOME/.dsh-antigravity'),
     agent: String(source.agent || 'dsh-bridge'),
     quotaUrl: String(source.quotaUrl || ''),
