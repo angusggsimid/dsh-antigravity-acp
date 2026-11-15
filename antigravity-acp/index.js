@@ -1318,6 +1318,21 @@ class Runtime {
     return this.ready
   }
 
+  /**
+   * Give a remote worker back before the id that names it is forgotten. Every
+   * forced rebuild used to drop `sessionId` and start a new session, which left
+   * the old ACP session alive inside the same front: its worker kept holding
+   * memory with nothing on this side pointing at it.
+   */
+  async #closeSession(conversation) {
+    const sessionId = conversation.sessionId
+    if (sessionId === undefined) return
+    if (conversation.link?.alive) {
+      try { await conversation.link.request('session/close', { sessionId }, 3_000) } catch { /* best effort */ }
+    }
+    conversation.link?.unregister(sessionId)
+  }
+
   async #bootstrap() {
     this.link = new Link(this.ctx, this)
     await this.#listen()
@@ -2045,6 +2060,7 @@ class Runtime {
       const foreignFresh = REPLAY_FOREIGN_TURNS && freshSlice.some((message) => message?.role === 'assistant' && message.source?.provider !== undefined && message.source.provider !== this.route.provider)
       let forceNew = false
       if (live && (!prefixOk || foreignFresh)) {
+        await this.#closeSession(conversation)
         conversation.sessionId = undefined
         conversation.toolKey = ''
         conversation.baseline = []
@@ -2062,6 +2078,7 @@ class Runtime {
         conversation.repairReason = undefined
         if (live && conversation.repairAttempts < SESSION_REPAIRS) {
           conversation.repairAttempts += 1
+          await this.#closeSession(conversation)
           conversation.sessionId = undefined
           conversation.toolKey = ''
           conversation.baseline = []
