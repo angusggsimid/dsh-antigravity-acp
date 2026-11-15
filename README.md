@@ -97,7 +97,7 @@ npm test
 | [docs/configuration.md](docs/configuration.md) | 本机配置和环境变量 |
 | [docs/decisions.md](docs/decisions.md) | 已经定下来的取舍 |
 | [docs/publishing.md](docs/publishing.md) | 公开仓库时守住的边界 |
-| [docs/ops/server.md](docs/ops/server.md) | 远端机器上要装的东西：swap、看护、无主 worker 回收 |
+| [docs/ops/server.md](docs/ops/server.md) | 远端机器上要装的东西，以及本机额度隧道的看护 |
 | [docs/history/migration-plan.md](docs/history/migration-plan.md) | 最初的改造计划，其中一部分已被后来的决定取代 |
 
 ## 许可证

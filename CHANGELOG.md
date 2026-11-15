@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.5.10
+
+- 本机额度隧道的看护加了安装脚本和 LaunchAgent 模板（`scripts/install-local-watch.sh`、`scripts/launchd/`），换一台 Mac 不用手写 plist。
+
 ## 5.5.9
 
 - 反向隧道换新之前先关掉旧的，并且旧进程退出时不再把「当前隧道」清掉。之前退出回调无条件把 `this.tunnel` 置空，新隧道的引用丢失，旧的 ssh 继续跑，一台机器上会同时留下好几条 `-R`。

@@ -114,10 +114,10 @@ tail -5 /var/log/antigravity-guard.log
 [`scripts/local-tunnel-watch.sh`](../../scripts/local-tunnel-watch.sh) 每 30 秒检查每个 `-L` 端口。端口不回答就杀掉对应的 ssh，让 launchd 的 KeepAlive 重新连。同一个端口 3 分钟内只杀一次，避免远端额度服务真挂了的时候来回重启。
 
 ```sh
-cp scripts/local-tunnel-watch.sh ~/.dsh/antigravity-tunnel-watch.sh
-chmod +x ~/.dsh/antigravity-tunnel-watch.sh
-# LaunchAgent com.agg.antigravity-tunnel-watch，StartInterval 30
+./scripts/install-local-watch.sh
 ```
+
+安装脚本会把看护脚本复制到 `~/.dsh/`，按 `scripts/launchd/` 里的模板生成 LaunchAgent（把 `__HOME__` 换成真实路径，launchd 不展开变量），然后加载它。重复执行只会重装并重新加载，不会留下重复的定时器。
 
 两条隧道的 ssh 还带 `ServerAliveInterval=15`、`ServerAliveCountMax=2`、`TCPKeepAlive=yes`。对端没响应时大约 30 秒进程自己退出，不必等到看护来杀。
 
