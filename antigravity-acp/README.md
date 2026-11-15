@@ -1,4 +1,4 @@
-# @local/dsh-antigravity-acp
+# dsh-antigravity-acp
 
 DeepSeek Harness 插件包。通过 SSH 上的官方 `agy acp` 运行 Gemini。默认模型是 Gemini 3.8 Flash，路线上的 `modelId` 可以改成那台机器的 `agy` 所接受的其他模型。工具在运行 DSH 的机器上执行。项目说明、安装方式和许可证在仓库根目录：
 

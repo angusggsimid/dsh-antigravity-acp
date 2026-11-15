@@ -46,7 +46,7 @@ DeepSeek Harness 插件。用官方 Antigravity CLI（`agy acp`）把 Gemini 接
 - 不伪装成别的客户端，也不复刻 Gemini 的 HTTP 接口。
 - 不从 ACP 对话里读取 5 小时 / 每周额度。ACP 只返回这一轮的 token。额度来自一条单独的本地 HTTP 桥，没有这条桥时聊天仍然可用。
 - 不在这里管理云端账号。登录在远端的 `agy` 里完成。
-- 不发布到 npm。`package.json` 里的 `"private": true` 是故意留下的。
+- 包名是 `dsh-antigravity-acp`，已经去掉 `private`，但还没有发布到 npm。从 GitHub 地址安装不依赖 npm。
 
 ## 使用前要有的东西
 
@@ -58,10 +58,10 @@ DeepSeek Harness 插件。用官方 Antigravity CLI（`agy acp`）把 Gemini 接
 
 ## 安装
 
-按仓库地址安装，把下面这一行加进 profile 的 `dependencies`，并把 `@local/dsh-antigravity-acp` 加进 `dsh.profile.bundles`：
+按仓库地址安装，把下面这一行加进 profile 的 `dependencies`，并把 `dsh-antigravity-acp` 加进 `dsh.profile.bundles`：
 
 ```json
-"@local/dsh-antigravity-acp": "github:angusggsimid/dsh-antigravity-acp"
+"dsh-antigravity-acp": "github:angusggsimid/dsh-antigravity-acp"
 ```
 
 命令行等价于 `dsh plugin --profile <profile> add github:angusggsimid/dsh-antigravity-acp`。桌面版的 profile 名是 `desktop`，不是 `web`。装完后重新加载 DSH。Host 侧的改动只刷新页面不够。
@@ -72,11 +72,11 @@ DeepSeek Harness 插件。用官方 Antigravity CLI（`agy acp`）把 Gemini 接
 {
   "dsh": {
     "profile": {
-      "bundles": ["@local/dsh-antigravity-acp"]
+      "bundles": ["dsh-antigravity-acp"]
     }
   },
   "dependencies": {
-    "@local/dsh-antigravity-acp": "link:/absolute/path/to/dsh-antigravity-acp/antigravity-acp"
+    "dsh-antigravity-acp": "link:/absolute/path/to/dsh-antigravity-acp/antigravity-acp"
   }
 }
 ```

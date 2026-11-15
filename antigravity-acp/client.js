@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: '@local/dsh-antigravity-acp',
+  id: 'dsh-antigravity-acp',
   factory(require) {
     const React = require('react')
     const h = React.createElement

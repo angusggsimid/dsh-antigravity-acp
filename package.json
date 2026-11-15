@@ -1,7 +1,6 @@
 {
-  "name": "@local/dsh-antigravity-acp",
-  "version": "5.5.12",
-  "private": true,
+  "name": "dsh-antigravity-acp",
+  "version": "5.5.13",
   "license": "MIT",
   "type": "module",
   "description": "Gemini through the official Antigravity ACP server over SSH. Any model id that agy accepts; Gemini 3.8 Flash is the default. Tools run locally. Shows the subscription quota.",

@@ -46,7 +46,7 @@ Routes live in the local config file, not in the repository. Chat, tool transpor
 - It does not impersonate another client, and it does not reimplement the Gemini HTTP API.
 - It does not read the 5-hour or weekly quota from the ACP session. ACP reports tokens for the current turn only. Those windows come from a separate local HTTP bridge. Chat still works without that bridge.
 - It does not manage the cloud account. Sign-in stays inside `agy` on the remote host.
-- It is not published to npm. `"private": true` in `package.json` is intentional.
+- The package name is `dsh-antigravity-acp` and `private` is no longer set, but it is not published to npm yet. Installing from the GitHub URL does not need npm.
 
 ## Requirements
 
@@ -58,10 +58,10 @@ Routes live in the local config file, not in the repository. Chat, tool transpor
 
 ## Install
 
-Install from the repository URL. Add this dependency, and add `@local/dsh-antigravity-acp` to `dsh.profile.bundles`:
+Install from the repository URL. Add this dependency, and add `dsh-antigravity-acp` to `dsh.profile.bundles`:
 
 ```json
-"@local/dsh-antigravity-acp": "github:angusggsimid/dsh-antigravity-acp"
+"dsh-antigravity-acp": "github:angusggsimid/dsh-antigravity-acp"
 ```
 
 The same spec is `dsh plugin --profile <profile> add github:angusggsimid/dsh-antigravity-acp`. The desktop profile is named `desktop`, not `web`. Reload DeepSeek Harness after installing. A page refresh is not enough for host-side changes.
@@ -72,11 +72,11 @@ While changing the code locally, point the dependency at the cloned `antigravity
 {
   "dsh": {
     "profile": {
-      "bundles": ["@local/dsh-antigravity-acp"]
+      "bundles": ["dsh-antigravity-acp"]
     }
   },
   "dependencies": {
-    "@local/dsh-antigravity-acp": "link:/absolute/path/to/dsh-antigravity-acp/antigravity-acp"
+    "dsh-antigravity-acp": "link:/absolute/path/to/dsh-antigravity-acp/antigravity-acp"
   }
 }
 ```

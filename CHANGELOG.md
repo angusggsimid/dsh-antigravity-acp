@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.5.13
+
+- 包名从 `@local/dsh-antigravity-acp` 改为 `dsh-antigravity-acp`，并去掉 `private`。还没有发布到 npm。本机 desktop profile 的依赖名已跟着改。
+
 ## 5.5.12
 
 - README 加了两张 Grok Imagine 配图。商店用的位图图标在 `docs/images/icon-180.png`。
