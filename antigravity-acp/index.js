@@ -1456,6 +1456,7 @@ class Runtime {
    */
   async #connectVerified() {
     let lastFailure = ''
+    let silent = 0
     for (let attempt = 0; attempt <= TUNNEL_PORTS; attempt += 1) {
       if (attempt > 0) this.#rotateRemotePort()
       try {
@@ -1472,7 +1473,14 @@ class Runtime {
       } catch (error) {
         lastFailure = error instanceof Error ? error.message : String(error)
         if (this.stopping || error?.transport === true) throw error
+        silent += 1
       }
+    }
+    // Every port bound and every port stayed silent. A dead name looks like that
+    // once; doing it repeatedly means the host's forward is not relaying at all,
+    // which the user fixes on that machine, not here.
+    if (silent > 1) {
+      throw new Error(`${this.route.providerName}: the host accepted the forward on ${silent} ports but never relayed traffic — its sshd looks unhealthy (restart it, or check the host); ${lastFailure}`)
     }
     throw new Error(lastFailure || `${this.route.providerName} reverse tunnel could not be verified`)
   }
