@@ -44,6 +44,7 @@ Routes live in the local config file, not in the repository. Chat, tool transpor
 - A machine that can run official `agy`, and SSH from this computer to it.
 - `agy` on that machine already signed in to Google AI Pro / Antigravity.
 - The local HTTP bridge, and a credential in the DeepSeek Harness store, only if you want the quota badge.
+- On that machine, run [`scripts/server-guard.sh`](scripts/server-guard.sh) once: swap, log caps, and a five-minute guard that records resources and reaps orphaned workers. Why and how: [docs/ops/server.md](docs/ops/server.md). The plugin works without it, but a host that runs out of memory takes SSH down with it.
 
 ## Install
 
@@ -94,6 +95,7 @@ npm test
 | [docs/setup.en.md](docs/setup.en.md) | How to reproduce the routes, with no machine-specific secrets |
 | [docs/architecture.md](docs/architecture.md) | How it is put together |
 | [docs/configuration.md](docs/configuration.md) | Local config and environment variables |
+| [docs/ops/server.md](docs/ops/server.md) | What to install on the remote host: swap, the guard, worker reaping |
 
 ## License
 

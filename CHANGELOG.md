@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.5.4
+
+- 隧道尝试加了总量预算：每路线每 10 分钟最多 20 次，超出就停手并说明原因，可用 `DSH_AGY_TUNNEL_SPAWNS` 调整。一次事故里同一端口在 15 分钟内被重试了 1336 次，这种风暴会把小内存机器连同 SSH 一起拖死。
+- 退出时先等 `session/close` 发出去（最多 1.5 秒）再拆隧道和链路。之前是先拆链路，正常退出也会在远端留下 worker。
+- 启动时报告远端 worker 数、可用内存和 swap；没有 swap 会提示去跑服务器脚本。
+- 新增 [`scripts/server-guard.sh`](scripts/server-guard.sh) 与 [docs/ops/server.md](docs/ops/server.md)：swap、日志上限、每 5 分钟记录资源并回收无主 worker。
+
 ## 5.5.3
 
 - 远端端口不再写死。转发端口被上一次 DSH 留下的会话占着时（特征是端口能连上却永远不应答），自动换一个远端端口重连，并让受影响的会话在下一轮重建，不再报「隧道在但到不了本地工具桥」。最多试 5 个端口，可用 `DSH_AGY_TUNNEL_PORTS` 调整。

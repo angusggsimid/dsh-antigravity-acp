@@ -117,6 +117,16 @@ const SESSION_REPAIRS = Number(process.env.DSH_AGY_SESSION_REPAIRS ?? 2)
  * the user, so move to another one instead of failing the turn.
  */
 const TUNNEL_PORTS = Number(process.env.DSH_AGY_TUNNEL_PORTS ?? 5)
+/**
+ * Attempts allowed per route per window. A forward that keeps failing used to
+ * retry as fast as its callers asked: one incident produced 1336 failed binds in
+ * fifteen minutes, and on a small host that flood is what took the machine down.
+ * The budget turns "retry forever" into "stop and say so".
+ */
+const TUNNEL_SPAWNS = Number(process.env.DSH_AGY_TUNNEL_SPAWNS ?? 20)
+const TUNNEL_SPAWN_WINDOW_MS = 10 * 60_000
+/** How long shutdown waits for `session/close` to reach the remote before tearing the link down. */
+const SHUTDOWN_GRACE_MS = 1_500
 /** How long a fresh forward gets before it counts as unreachable. */
 const TUNNEL_VERIFY_MS = 15_000
 /** A retry on another port does not deserve the full window. */
@@ -1266,6 +1276,8 @@ class Runtime {
     this.probeStderr = ''
     this.tunnelAttempts = 0
     this.tunnelRestart = undefined
+    /** Spawn timestamps inside the current budget window. */
+    this.spawns = []
     /** True only while the remote host can actually reach this route's MCP port. */
     this.tunnelVerified = false
     this.tunnelSpawned = undefined
@@ -1300,6 +1312,7 @@ class Runtime {
     // Warm the front only after this route's tunnel answers. Starting agy first
     // makes it sit on a dead MCP port and then answer with no tools at all.
     if (WARMUP) this.ready.then(() => this.link?.start()).catch(() => {})
+    void this.ready.then(() => this.#reportRemote()).catch(() => {})
     this.sweeper = setInterval(() => this.#sweep(), SWEEP_MS)
     this.sweeper.unref?.()
     return this.ready
@@ -1309,6 +1322,37 @@ class Runtime {
     this.link = new Link(this.ctx, this)
     await this.#listen()
     await this.#ensureTunnel()
+  }
+
+  /**
+   * Record the host's shape once at startup: worker count, available memory and
+   * swap. A host with no swap is one reconnect storm away from freezing, and the
+   * operator should hear that from the plugin instead of from an outage.
+   */
+  async #reportRemote() {
+    if (NO_TUNNEL || ACP_COMMAND) return
+    try {
+      requireSsh(this.route)
+      const text = await new Promise((resolve) => {
+        let out = ''
+        const child = spawn('ssh', [...sshOptions(this.route), '-T', this.route.sshHost, '--',
+          'free -m; pgrep -fc "[a]gy acp" || echo 0'], { stdio: ['ignore', 'pipe', 'ignore'] })
+        const timer = setTimeout(() => { try { child.kill('SIGTERM') } catch { /* gone */ } resolve(out) }, 15_000)
+        timer.unref?.()
+        child.stdout.on('data', (chunk) => { out += chunk.toString() })
+        child.on('error', () => { clearTimeout(timer); resolve(out) })
+        child.on('exit', () => { clearTimeout(timer); resolve(out) })
+      })
+      const mem = /^Mem:\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+(\d+)/m.exec(text)?.[1]
+      const swap = Number(/^Swap:\s+(\d+)/m.exec(text)?.[1] ?? 0)
+      const workers = Number(/(\d+)\s*$/.exec(text.trim())?.[1] ?? 0)
+      log(this.ctx, `${this.route.provider} host: ${workers} ACP worker(s), ${mem ?? '?'} MB available, ${swap} MB swap`)
+      if (swap === 0) {
+        log(this.ctx, `${this.route.provider} host has no swap: one reconnect storm can freeze it. Run scripts/server-guard.sh there, see docs/ops/server.md`)
+      } else if (workers > MAX_HARD_SESSIONS * 2) {
+        log(this.ctx, `${this.route.provider} host holds ${workers} ACP workers for this client alone; stale ones are reaped by scripts/server-guard.sh`)
+      }
+    } catch { /* a report never blocks a route */ }
   }
 
   /**
@@ -1434,6 +1478,18 @@ class Runtime {
   }
 
   async #spawnTunnel() {
+    const now = Date.now()
+    this.spawns = this.spawns.filter((at) => now - at < TUNNEL_SPAWN_WINDOW_MS)
+    if (this.spawns.length >= TUNNEL_SPAWNS) {
+      const error = new Error(`${this.route.providerName}: ${TUNNEL_SPAWNS} tunnel attempts within ${Math.round(TUNNEL_SPAWN_WINDOW_MS / 60_000)} minutes; holding off. Check the host (see docs/ops/server.md), then restart DSH`)
+      error.budget = true
+      if (!this.budgetLogged) {
+        this.budgetLogged = true
+        log(this.ctx, `${this.route.provider}: tunnel attempt budget spent, no further forwards until the window moves`)
+      }
+      throw error
+    }
+    this.spawns.push(now)
     this.tunnelVerified = false
     this.tunnelStderr = ''
     const child = spawn('ssh', [...sshOptions(this.route), '-o', 'ExitOnForwardFailure=yes', '-N',
@@ -1463,6 +1519,8 @@ class Runtime {
         await this.#tunnelSpawn()
       } catch (error) {
         lastFailure = error instanceof Error ? error.message : String(error)
+        // A spent budget or a refused session is not a port problem: stop asking.
+        if (error?.budget === true || error?.transport === true) throw error
         // sshd refused the bind: that port is taken, and another one may be free.
         if (REMOTE_PORT_TAKEN.test(this.tunnelStderr)) continue
         throw error
@@ -1601,6 +1659,10 @@ class Runtime {
         this.tunnelAttempts = 0
         log(this.ctx, 'reverse tunnel restored')
       }, (error) => {
+        if (error?.budget === true) {
+          log(this.ctx, 'reverse tunnel attempt budget spent; not retrying in the background')
+          return
+        }
         log(this.ctx, `reverse tunnel restart failed: ${error instanceof Error ? error.message : error}`)
         this.#scheduleTunnelRestart()
       })
@@ -1608,11 +1670,23 @@ class Runtime {
     this.tunnelRestart.unref?.()
   }
 
-  stop() {
+  async stop() {
     this.stopping = true
     clearInterval(this.sweeper)
     clearTimeout(this.tunnelRestart)
-    for (const conversation of this.conversations.values()) conversation.close()
+    // Close the sessions while the transport still exists. `session/close` is the
+    // only thing that frees the remote worker, and tearing the link down first —
+    // what this used to do — left one behind on every clean quit. Bounded so an
+    // unreachable host cannot stall the whole application exit.
+    const closing = [...this.conversations.values()].map((conversation) => (
+      conversation.close().catch(() => {})
+    ))
+    if (closing.length > 0) {
+      let timer
+      const grace = new Promise((resolve) => { timer = setTimeout(resolve, SHUTDOWN_GRACE_MS) })
+      timer.unref?.()
+      await Promise.race([Promise.allSettled(closing), grace])
+    }
     this.conversations.clear()
     this.tenants.clear()
     try { this.server?.close() } catch { /* already closed */ }
@@ -2253,9 +2327,9 @@ export function apply(ctx) {
       runtime.start().catch((error) => log(ctx, `${route.id} startup failed: ${error instanceof Error ? error.message : error}`))
       const handle = ctx.llm.registerAdapter([route.provider], createAdapter(runtime))
       log(ctx, `registered provider ${route.provider} (${route.providerName})`)
-      return () => {
+      return async () => {
         handle()
-        runtime.stop()
+        await runtime.stop()
       }
     })
   }
